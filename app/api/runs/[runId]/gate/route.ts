@@ -17,7 +17,8 @@ import { getSessionUser, unauthorizedResponse } from '@/lib/devfactory/auth'
 
 export async function POST(
   req: NextRequest,
-  { params }: { params: { runId: string } },
+  // runId não é lido daqui — vem embutido no token do gate (ver abaixo).
+  _params: { params: Promise<{ runId: string }> },
 ) {
   const user = await getSessionUser(req)
   if (!user) return unauthorizedResponse()

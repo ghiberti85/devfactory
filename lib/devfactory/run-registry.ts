@@ -16,6 +16,7 @@ import type { AgentProvider, ProviderKeyring } from './agent-runner'
 
 // ─── Keyring de modelos LLM (BYOK) ─────────────────────────────────────────
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- userId será usado quando a query real ao Supabase entrar (ver comentário abaixo)
 export async function getUserKeyring(userId: string): Promise<{
   keyring: ProviderKeyring
   userProviders: AgentProvider[]
@@ -52,6 +53,7 @@ export async function getUserKeyring(userId: string): Promise<{
 
 // ─── Token do GitHub (modo brownfield) ─────────────────────────────────────
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- userId será usado quando a query real ao Supabase entrar (ver comentário abaixo)
 export async function getUserGithubToken(userId: string): Promise<string | null> {
   // Em produção:
   // const { data } = await supabase

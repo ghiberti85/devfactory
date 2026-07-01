@@ -57,7 +57,7 @@ devfactory/
 1. **API keys nunca trafegam como dado de workflow** — o Workflow SDK persiste input/output de cada step num event log. `ProjectRun` carrega só `userProviders: string[]` (metadado), nunca a key decifrada. Keys são resolvidas dentro de cada step via `getUserKeyring(run.userId)`.
 2. **Modelos pagos só ficam disponíveis com BYOK configurado** — a regra em `model-selector.ts` (`filterCandidates`) bloqueia todo modelo com `hasFreeTier === false && !isLocal` se o provider não estiver em `ctx.userProviders`. Não contornar essa checagem.
 3. **Toda rota de API chama `getSessionUser()` primeiro** — antes de qualquer lógica. Retornar 401 imediatamente se não houver sessão.
-4. **Código gerado pela IA só roda dentro do Vercel Sandbox** (`sandbox-runner.ts`), nunca no processo da aplicação. `setNetworkPolicy('deny-all')` **antes** de rodar o código.
+4. **Código gerado pela IA só roda dentro do Vercel Sandbox** (`sandbox-runner.ts`), nunca no processo da aplicação. `sandbox.update({ networkPolicy: 'deny-all' })` **antes** de rodar o código.
 5. **RLS em toda tabela do Supabase** — toda query que lida com dados de usuário usa o client com a sessão do usuário, não o `service_role` key. O `service_role` só é usado para operações de admin (seed de modelos, migrations).
 6. **`vm2` é proibido** — tem CVEs de sandbox escape conhecidos e o projeto foi descontinuado. Não adicionar como dependência.
 

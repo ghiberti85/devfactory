@@ -60,11 +60,42 @@ export interface RepoContext {
   truncated: boolean // true se o repo era grande demais e o conteúdo foi cortado
 }
 
+// ─── Formas mínimas da API REST do GitHub usadas aqui ─────────────────────────
+
+interface GitHubRepoMeta {
+  default_branch: string
+}
+
+interface GitHubTreeNode {
+  path: string
+  type: string
+}
+
+interface GitHubTreeResponse {
+  tree: GitHubTreeNode[]
+  truncated: boolean
+}
+
+interface GitHubContentResponse {
+  content?:  string
+  encoding?: string
+}
+
+interface GitHubRepoListItem {
+  owner: { login: string }
+  name: string
+  full_name: string
+  private: boolean
+  default_branch: string
+  updated_at: string
+  description: string | null
+}
+
 // ─── GitHub API client (mínimo, sem dependências externas) ───────────────────
 
 const GITHUB_API = 'https://api.github.com'
 
-async function ghFetch(path: string, token: string): Promise<any> {
+async function ghFetch<T>(path: string, token: string): Promise<T> {
   const res = await fetch(`${GITHUB_API}${path}`, {
     headers: {
       Authorization: `Bearer ${token}`,
@@ -77,13 +108,13 @@ async function ghFetch(path: string, token: string): Promise<any> {
     if (res.status === 401 || res.status === 403) throw new Error('Token do GitHub inválido ou sem permissão.')
     throw new Error(`GitHub API ${res.status}: ${await res.text()}`)
   }
-  return res.json()
+  return res.json() as Promise<T>
 }
 
 async function ghFetchRaw(path: string, token: string): Promise<string | null> {
   try {
-    const data = await ghFetch(path, token)
-    if (data?.content && data?.encoding === 'base64') {
+    const data = await ghFetch<GitHubContentResponse>(path, token)
+    if (data.content && data.encoding === 'base64') {
       return Buffer.from(data.content, 'base64').toString('utf-8')
     }
     return null
@@ -106,7 +137,7 @@ function detectStackFromPackageJson(pkgJsonRaw: string | null): RepoContext['det
   }
   if (!pkgJsonRaw) return empty
 
-  let pkg: any
+  let pkg: { dependencies?: Record<string, string>; devDependencies?: Record<string, string> }
   try { pkg = JSON.parse(pkgJsonRaw) } catch { return empty }
 
   const deps = { ...pkg.dependencies, ...pkg.devDependencies }
@@ -157,18 +188,18 @@ export async function fetchRepoContext(
   ref: GitHubRepoRef,
   userGithubToken: string,
 ): Promise<RepoContext> {
-  const repoMeta = await ghFetch(`/repos/${ref.owner}/${ref.repo}`, userGithubToken)
+  const repoMeta = await ghFetch<GitHubRepoMeta>(`/repos/${ref.owner}/${ref.repo}`, userGithubToken)
   const branch = ref.branch ?? repoMeta.default_branch
 
   // Árvore completa (recursiva) — uma chamada só
-  const treeData = await ghFetch(
+  const treeData = await ghFetch<GitHubTreeResponse>(
     `/repos/${ref.owner}/${ref.repo}/git/trees/${branch}?recursive=1`,
     userGithubToken,
   )
 
   const allPaths: string[] = (treeData.tree ?? [])
-    .filter((n: any) => n.type === 'blob')
-    .map((n: any) => n.path)
+    .filter(n => n.type === 'blob')
+    .map(n => n.path)
 
   const truncated = allPaths.length > MAX_FILES_IN_TREE || treeData.truncated === true
   const fileTree = allPaths.slice(0, MAX_FILES_IN_TREE)
@@ -236,8 +267,8 @@ export interface RepoSummary {
 }
 
 export async function listUserRepos(userGithubToken: string): Promise<RepoSummary[]> {
-  const data = await ghFetch('/user/repos?sort=updated&per_page=50', userGithubToken)
-  return (data as any[]).map(r => ({
+  const data = await ghFetch<GitHubRepoListItem[]>('/user/repos?sort=updated&per_page=50', userGithubToken)
+  return data.map(r => ({
     owner: r.owner.login,
     repo: r.name,
     fullName: r.full_name,

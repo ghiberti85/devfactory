@@ -4,9 +4,11 @@
  * Design: dark terminal, violet accent, monospace output.
  */
 
+'use client'
+
 import { useState, useEffect, useRef }  from 'react'
-import type { SSEEvent, ProjectRun, StageRecord, QualityReport } from '@/lib/devfactory/types'
-import type { PipelineStage }           from '@/lib/devfactory/types'
+import { getPipelineStages }            from '@/lib/devfactory/types'
+import type { SSEEvent, ProjectRun, StageRecord, QualityReport, PipelineStage } from '@/lib/devfactory/types'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -35,6 +37,7 @@ interface LiveEvent {
 // ─── Stage metadata ───────────────────────────────────────────────────────────
 
 const STAGE_META: Record<PipelineStage, { label: string; icon: string; color: string }> = {
+  codebase_analysis: { label: 'Análise de Código', icon: '🔍', color: '#22d3ee' },
   planning:        { label: 'Planejamento',      icon: '📋', color: '#a78bfa' },
   docs_initial:    { label: 'Documentação',       icon: '📄', color: '#60a5fa' },
   design:          { label: 'Design',             icon: '🎨', color: '#f472b6' },
@@ -45,11 +48,6 @@ const STAGE_META: Record<PipelineStage, { label: string; icon: string; color: st
   docs_final:      { label: 'Docs Final',         icon: '📚', color: '#94a3b8' },
 }
 
-const PIPELINE_ORDER: PipelineStage[] = [
-  'planning', 'docs_initial', 'design', 'backend',
-  'frontend', 'tests', 'quality_council', 'docs_final',
-]
-
 // ─── Hooks ────────────────────────────────────────────────────────────────────
 
 function useRunStream(runId: string) {
@@ -59,6 +57,9 @@ function useRunStream(runId: string) {
   const [pendingStage, setPendingStage] = useState<PipelineStage | null>(null)
   const counterRef = useRef(0)
   const sourceRef  = useRef<EventSource | null>(null)
+  const statusRef  = useRef<UIStatus>('idle')
+
+  useEffect(() => { statusRef.current = status }, [status])
 
   useEffect(() => {
     if (!runId) return
@@ -71,17 +72,18 @@ function useRunStream(runId: string) {
       counterRef.current++
       setEvents(prev => [
         ...prev.slice(-99),   // manter últimos 100 eventos
-        { id: counterRef.current, type, stage: data.stage, payload: data.payload, timestamp: data.timestamp },
+        // data.timestamp sempre chega como string ISO — JSON não serializa Date
+        { id: counterRef.current, type, stage: data.stage, payload: data.payload, timestamp: new Date(data.timestamp) },
       ])
       return data
     }
 
     source.addEventListener('run.snapshot',       e => { const d = addEvent('run.snapshot', e);       setRun(d.payload as ProjectRun) })
     source.addEventListener('run.started',        e => { addEvent('run.started', e);                  setStatus('running') })
-    source.addEventListener('run.completed',      e => { const d = addEvent('run.completed', e);      setStatus('completed'); setRun(prev => prev ? { ...prev, status: 'completed' } : null) })
+    source.addEventListener('run.completed',      e => { addEvent('run.completed', e);                setStatus('completed'); setRun(prev => prev ? { ...prev, status: 'completed' } : null) })
     source.addEventListener('run.failed',         e => { addEvent('run.failed', e);                   setStatus('failed') })
     source.addEventListener('run.cancelled',      e => { addEvent('run.cancelled', e);                setStatus('cancelled') })
-    source.addEventListener('stage.started',      e => { const d = addEvent('stage.started', e);      setStatus('running'); setPendingStage(null) })
+    source.addEventListener('stage.started',      e => { addEvent('stage.started', e);                setStatus('running'); setPendingStage(null) })
     source.addEventListener('stage.model_selected', e => addEvent('stage.model_selected', e))
     source.addEventListener('stage.executing',    e => addEvent('stage.executing', e))
     source.addEventListener('stage.self_critiquing', e => addEvent('stage.self_critiquing', e))
@@ -100,7 +102,7 @@ function useRunStream(runId: string) {
     })
 
     source.onerror = () => {
-      if (status !== 'completed' && status !== 'cancelled') setStatus('failed')
+      if (statusRef.current !== 'completed' && statusRef.current !== 'cancelled') setStatus('failed')
     }
 
     return () => source.close()
@@ -132,9 +134,10 @@ function useRunStream(runId: string) {
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
 function PipelineProgress({ run }: { run: ProjectRun | null }) {
+  const order = getPipelineStages(run?.config.projectMode ?? 'greenfield')
   return (
     <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-      {PIPELINE_ORDER.map(stage => {
+      {order.map(stage => {
         const meta       = STAGE_META[stage]
         const stageData  = run?.stages[stage]
         const isCurrent  = run?.currentStage === stage
@@ -191,7 +194,7 @@ function CostBadge({ run }: { run: ProjectRun | null }) {
 }
 
 function ModelBadge({ event }: { event: LiveEvent }) {
-  const payload = event.payload as any
+  const payload = event.payload as { model?: string; tier?: number } | null
   if (!payload?.model) return null
   return (
     <span style={{
@@ -243,7 +246,7 @@ function LiveLog({ events }: { events: LiveEvent[] }) {
       {events.map(ev => (
         <div key={ev.id} style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
           <span style={{ color: '#333', flexShrink: 0 }}>
-            {new Date(ev.timestamp).toLocaleTimeString('pt-BR')}
+            {ev.timestamp.toLocaleTimeString('pt-BR')}
           </span>
           <span style={{ color: eventColors[ev.type] ?? '#555', flexShrink: 0, minWidth: 220 }}>
             {ev.type}
@@ -281,6 +284,12 @@ function QualityCouncilPanel({
       <p style={{ color: '#94a3b8', fontSize: 13, margin: 0 }}>
         Quality Council concluído — {reports.length} dimensões analisadas.
       </p>
+
+      {!allPassed && (
+        <p style={{ color: '#f87171', fontSize: 12, margin: 0 }}>
+          ⚠ Uma ou mais dimensões falharam — revise antes de aprovar.
+        </p>
+      )}
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
         {reports.map(r => (
@@ -588,10 +597,14 @@ function StageOutputPanel({
 
 export default function HumanGate({ runId, onComplete }: HumanGateProps) {
   const { run, status, events, pendingStage, sendDecision, cancel } = useRunStream(runId)
+  const completedRef = useRef(false)
 
   useEffect(() => {
-    if (status === 'completed' && run && onComplete) onComplete(run)
-  }, [status, run])
+    if (status === 'completed' && run && onComplete && !completedRef.current) {
+      completedRef.current = true
+      onComplete(run)
+    }
+  }, [status, run, onComplete])
 
   const qualityReports = run?.qualityReports ?? []
 
@@ -728,7 +741,7 @@ export default function HumanGate({ runId, onComplete }: HumanGateProps) {
           <div>
             <div style={{ color: '#34d399', fontWeight: 600 }}>Pipeline concluída com sucesso</div>
             <div style={{ color: '#555', fontSize: 12, fontFamily: 'monospace', marginTop: 2 }}>
-              {PIPELINE_ORDER.length} etapas •  custo total: ${run.totalCostUsd.toFixed(6)} USD
+              {getPipelineStages(run.config.projectMode).length} etapas •  custo total: ${run.totalCostUsd.toFixed(6)} USD
             </div>
           </div>
         </div>

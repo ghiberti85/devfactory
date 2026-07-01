@@ -8,7 +8,7 @@
  * compartilhem a mesma forma de dados sem acoplar a um motor específico.
  */
 
-import type { Stage, Tier, SelectionResult } from './model-selector'
+import type { SelectionResult } from './model-selector'
 import type { RouterOutput }                  from './complexity-router'
 
 // ─── Etapas da pipeline ─────────────────────────────────────────────────────
@@ -63,7 +63,10 @@ export interface StageIteration {
   iterationNumber: number
   operation:       string
   routerOutput:    RouterOutput
-  selectionResult: SelectionResult
+  // Ausente no Quality Council: a etapa roda 5 análises em paralelo, cada
+  // uma com sua própria ferramenta (ver QualityReport.model) — não existe
+  // um único modelo/seleção representativo da iteração inteira.
+  selectionResult?: SelectionResult
   agentOutput:     unknown
   selfCritique:    SelfCritique
   startedAt:       string

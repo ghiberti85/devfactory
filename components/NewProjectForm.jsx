@@ -1,3 +1,5 @@
+'use client'
+
 import { useState, useEffect } from "react"
 
 // ─── Design tokens (mirror do Dashboard) ──────────────────────────────────────
@@ -263,6 +265,10 @@ export default function NewProjectForm({ onSubmit, onCancel }) {
         setRepos([])
       })
       .finally(() => setReposLoading(false))
+    // repos.length/reposLoading ficam de fora de propósito: são o próprio
+    // guard-clause do efeito — incluí-los causaria um loop de refetch toda
+    // vez que a busca falhasse e zerasse repos/reposLoading.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectSource])
 
   const filteredRepos = repoSearch.trim()

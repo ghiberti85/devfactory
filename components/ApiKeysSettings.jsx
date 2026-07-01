@@ -1,3 +1,5 @@
+'use client'
+
 import { useState, useEffect } from "react"
 
 const T = {
@@ -204,7 +206,7 @@ function GitHubConnectionCard() {
               )}
             </div>
             <div style={{ fontSize: 11, color: T.text2, marginTop: 3 }}>
-              Necessário para usar "Repositório existente" ao criar um novo run.
+              Necessário para usar &ldquo;Repositório existente&rdquo; ao criar um novo run.
             </div>
           </div>
         </div>

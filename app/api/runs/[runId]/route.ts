@@ -14,29 +14,34 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server'
-import { getRun } from 'workflow/api'
 import { getSessionUser, unauthorizedResponse } from '@/lib/devfactory/auth'
+
+// Params ainda não usados nos dois handlers abaixo — placeholders 501 até a
+// leitura real do Postgres entrar (ver comentário do arquivo). Ao implementar,
+// importar `getRun` de 'workflow/api' e usar `params.runId` conforme o
+// exemplo comentado no topo deste arquivo.
 
 export async function GET(
   req: NextRequest,
-  { params }: { params: { runId: string } },
+  _params: { params: Promise<{ runId: string }> },
 ) {
   const user = await getSessionUser(req)
   if (!user) return unauthorizedResponse()
 
   // Fonte primária: Postgres (pipeline_runs + stage_outputs + stage_iterations)
   // Em produção:
+  // const { runId } = await _params.params
   // const { data: run } = await supabase
   //   .from('pipeline_runs')
   //   .select('*, stage_outputs(*, stage_iterations(*))')
-  //   .eq('id', params.runId)
+  //   .eq('id', runId)
   //   .single()
   // if (!run) return NextResponse.json({ error: 'Run não encontrado.' }, { status: 404 })
   // if (run.user_id !== user.id) return NextResponse.json({ error: 'Sem acesso.' }, { status: 403 })
   // if (['completed', 'failed'].includes(run.status)) {
   //   // Cross-check / complementa com o output final do workflow, se disponível
   //   try {
-  //     const wfRun = await getRun(params.runId)
+  //     const wfRun = await getRun(runId)
   //     return NextResponse.json({ ...run, finalOutput: (wfRun as any).output })
   //   } catch { /* getRun pode já ter expirado a retenção — não é fatal */ }
   // }
@@ -50,7 +55,7 @@ export async function GET(
 
 export async function DELETE(
   req: NextRequest,
-  { params }: { params: { runId: string } },
+  _params: { params: Promise<{ runId: string }> },
 ) {
   const user = await getSessionUser(req)
   if (!user) return unauthorizedResponse()

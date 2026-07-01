@@ -1,3 +1,5 @@
+'use client'
+
 import { useState, useEffect, useCallback } from "react"
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, RadarChart, Radar, PolarGrid, PolarAngleAxis } from "recharts"
 
@@ -734,6 +736,9 @@ function OriginEvolution({ onInfo }) {
 
 // ─── Dashboard ────────────────────────────────────────────────────────────────
 
+/**
+ * @param {{ onNewProject?: () => void }} props
+ */
 export default function Dashboard({ onNewProject } = {}) {
   const { isMobile, isTablet } = useBreakpoint()
   const [selectedRun, setSelectedRun] = useState(null)

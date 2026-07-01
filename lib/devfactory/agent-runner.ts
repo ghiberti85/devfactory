@@ -10,7 +10,7 @@
  *   AgentRunner.stream(params) → AsyncIterable   (tokens em tempo real)
  */
 
-import type { PipelineStage } from './types'
+import type { PipelineStage, SSEEvent } from './types'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -396,13 +396,13 @@ async function* streamOpenAICompat(
 export interface AgentRunnerOptions {
   retries?:    number    // default: 2
   timeoutMs?:  number    // default: 120_000 (2 min)
-  emit?:       (event: { type: string; stage?: string; payload: unknown; timestamp: Date }) => void
+  emit?:       (event: SSEEvent) => void
 }
 
 export class AgentRunner {
   private retries:   number
   private timeoutMs: number
-  private emit?:     (event: { type: string; stage?: string; payload: unknown; timestamp: Date }) => void
+  private emit?:     (event: SSEEvent) => void
 
   constructor(opts: AgentRunnerOptions = {}) {
     this.retries   = opts.retries   ?? 2
@@ -434,7 +434,7 @@ export class AgentRunner {
             tokensInput:  raw.inputTokens,
             tokensOutput: raw.outputTokens,
             latencyMs,
-            hasParseError: (output as any)?._parseError === true,
+            hasParseError: (output as { _parseError?: boolean } | null)?._parseError === true,
           },
           timestamp: new Date(),
         })
@@ -567,6 +567,7 @@ Critérios de score:
 0.0 = vazio, incoerente ou completamente errado`
 
 const STAGE_CRITIQUE_CRITERIA: Record<PipelineStage, string> = {
+  codebase_analysis: 'A análise cobre stack, convenções e cobertura de docs com oportunidades de melhoria acionáveis?',
   planning:        'O PRD tem goals, requirements, risks e estimativas claras?',
   docs_initial:    'A spec tem contratos de API, schema de DB e ADRs bem definidos?',
   design:          'Os design tokens são completos? Componentes têm props e variantes?',
@@ -604,13 +605,18 @@ export async function runSelfCritique(
     temperature:  0.1,
   })
 
-  const raw = result.output as any
+  const raw = result.output as {
+    score?:   number
+    passed?:  boolean
+    issues?:  SelfCritiqueResult['issues']
+    summary?: string
+  } | null
 
   return {
-    score:   typeof raw?.score   === 'number' ? raw.score   : 0.5,
-    passed:  typeof raw?.passed  === 'boolean'? raw.passed  : raw?.score >= 0.7,
+    score:   typeof raw?.score   === 'number'  ? raw.score   : 0.5,
+    passed:  typeof raw?.passed  === 'boolean' ? raw.passed  : (raw?.score ?? 0) >= 0.7,
     issues:  Array.isArray(raw?.issues) ? raw.issues : [],
-    summary: typeof raw?.summary === 'string' ? raw.summary : 'Avaliação indisponível.',
+    summary: typeof raw?.summary === 'string'  ? raw.summary : 'Avaliação indisponível.',
   }
 }
 

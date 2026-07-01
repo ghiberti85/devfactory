@@ -35,7 +35,13 @@ function encodeSSE(type: string, payload: unknown): string {
   return `event: ${type}\ndata: ${JSON.stringify({ type, payload, timestamp: new Date().toISOString() })}\n\n`
 }
 
-async function fetchRunSnapshot(runId: string, userId: string): Promise<any | null> {
+interface RunSnapshot {
+  status: string
+  [key: string]: unknown
+}
+
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- usados na query real comentada abaixo
+async function fetchRunSnapshot(runId: string, userId: string): Promise<RunSnapshot | null> {
   // Em produção:
   // const { data } = await supabase
   //   .from('pipeline_runs')
@@ -50,12 +56,12 @@ async function fetchRunSnapshot(runId: string, userId: string): Promise<any | nu
 
 export async function GET(
   req: NextRequest,
-  { params }: { params: { runId: string } },
+  { params }: { params: Promise<{ runId: string }> },
 ) {
   const user = await getSessionUser(req)
   if (!user) return unauthorizedResponse()
 
-  const { runId } = params
+  const { runId } = await params
   const encoder = new TextEncoder()
   let lastSnapshotJSON = ''
 

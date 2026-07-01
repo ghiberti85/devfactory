@@ -8,7 +8,8 @@
  * escape — não usar) ou rodar comandos diretamente no host.
  *
  * Padrão de segurança: instala dependências com rede liberada, depois
- * trava a rede (`setNetworkPolicy`) ANTES de rodar o código gerado pela IA.
+ * trava a rede (`sandbox.update({ networkPolicy: 'deny-all' })`) ANTES de
+ * rodar o código gerado pela IA.
  */
 
 import { Sandbox } from '@vercel/sandbox'
@@ -94,7 +95,7 @@ export async function runTestsInSandbox(
 
     // Trava a rede ANTES de rodar o código gerado pela IA — princípio do
     // menor privilégio: testes não precisam de acesso externo pra rodar.
-    await sandbox.setNetworkPolicy({ policy: 'deny-all' })
+    await sandbox.update({ networkPolicy: 'deny-all' })
 
     const [cmd, ...args] = testCommand
     const result = await sandbox.runCommand({ cmd, args })
@@ -133,7 +134,7 @@ export async function runQualityCheckInSandbox(
     }
 
     // Lockdown de rede antes de analisar código gerado pela IA
-    await sandbox.setNetworkPolicy({ policy: 'deny-all' })
+    await sandbox.update({ networkPolicy: 'deny-all' })
 
     const [cmd, ...args] = tooling.runCmd
     const result = await sandbox.runCommand({ cmd, args })
@@ -165,7 +166,9 @@ async function readAll(stream: unknown): Promise<string> {
   // runCommand pode retornar stdout como string já materializada ou como
   // stream, dependendo da forma de chamada — normaliza os dois casos.
   if (typeof stream === 'string') return stream
-  if (stream && typeof (stream as any).text === 'function') return (stream as any).text()
+  if (stream && typeof (stream as { text?: unknown }).text === 'function') {
+    return (stream as { text: () => Promise<string> }).text()
+  }
   return String(stream ?? '')
 }
 

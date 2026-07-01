@@ -24,7 +24,6 @@ import { z } from 'zod'
 
 import {
   getPipelineStages,
-  createProjectRun,
   type ProjectRun,
   type PipelineStage,
   type StageRecord,
@@ -35,10 +34,10 @@ import {
 } from './types'
 
 import { createSelector, DEFAULT_MODELS, type Tier, type Stage as SelectorStage } from './model-selector'
-import { createRouter } from './complexity-router'
+import { createRouter, type RouterProvider } from './complexity-router'
 import { createAgentRunner, resolveProviderConfig, type AgentProvider } from './agent-runner'
 import { getUserKeyring } from './run-registry'
-import { runQualityCheckInSandbox, type QualityDimension as SandboxDimension } from './sandbox-runner'
+import { runQualityCheckInSandbox, type QualityDimension as SandboxDimension, type GeneratedFile } from './sandbox-runner'
 
 // ─── Hook: gate humano ──────────────────────────────────────────────────────
 // Um único hook reutilizável; o token muda por run+etapa+iteração, então
@@ -113,7 +112,7 @@ export interface PipelineWorkflowInput {
 export async function runDevFactoryPipeline(input: PipelineWorkflowInput): Promise<ProjectRun> {
   'use workflow'
 
-  let run = { ...input.run, status: 'running' as const }
+  let run: ProjectRun = { ...input.run, status: 'running' }
   const stages = getPipelineStages(run.config.projectMode)
 
   for (const stage of stages) {
@@ -136,7 +135,6 @@ export async function runDevFactoryPipeline(input: PipelineWorkflowInput): Promi
 async function runStageWithGate(run: ProjectRun, stage: PipelineStage): Promise<ProjectRun> {
   let iteration = 0
   let tier: Tier = STAGE_DEFAULT_TIER[stage]
-  let critique: SelfCritique | null = null
   let lastIterationRecord: StageIteration | null = null
 
   run = initStage(run, stage)
@@ -144,19 +142,18 @@ async function runStageWithGate(run: ProjectRun, stage: PipelineStage): Promise<
   while (iteration < run.config.maxIterationsPerStage) {
     iteration++
 
-    const stepResult = stage === 'quality_council'
+    const stepResult: StageStepResult = stage === 'quality_council'
       ? await runQualityCouncilStep(run)
       : await runSingleStageStep(run, stage, tier, lastIterationRecord?.agentOutput)
 
     lastIterationRecord = stepResult.iteration
-    critique = stepResult.iteration.selfCritique
     run = appendIteration(run, stage, stepResult.iteration)
 
     if (stage === 'quality_council') {
       run = { ...run, qualityReports: stepResult.qualityReports ?? [] }
     }
 
-    if (critique.passed) break
+    if (stepResult.iteration.selfCritique.passed) break
     tier = Math.min((tier + 1) as Tier, 3) as Tier  // progressive escalation
   }
 
@@ -172,7 +169,12 @@ async function runStageWithGate(run: ProjectRun, stage: PipelineStage): Promise<
 
   await persistAwaitingHumanStep(run.id, stage, token)  // "use step" — grava no Postgres p/ histórico/observabilidade
 
-  const decision = await hook  // <<< suspende aqui, de minutos a meses
+  const rawDecision = await hook  // <<< suspende aqui, de minutos a meses
+
+  // O hook resolve com o payload cru do POST /gate (schema Zod, sem decidedAt).
+  // decidedAt é carimbado aqui, no momento real em que a decisão chegou —
+  // não no momento em que o gate foi criado.
+  const decision: HumanGateDecision = { ...rawDecision, decidedAt: new Date().toISOString() }
 
   await persistGateDecisionStep(run.id, stage, decision)  // "use step"
 
@@ -206,7 +208,7 @@ async function runSingleStageStep(
   const operation = STAGE_OPERATIONS[stage]
 
   const router = createRouter({
-    provider:            (process.env.ROUTER_PROVIDER as any) ?? 'google',
+    provider:            (process.env.ROUTER_PROVIDER as RouterProvider | undefined) ?? 'google',
     apiKey:              process.env.PLATFORM_GOOGLE_FREE_TIER_KEY ?? '',
     modelId:             process.env.ROUTER_MODEL ?? 'gemini-2.5-flash-lite',
     fallbackToHeuristic: true,
@@ -274,7 +276,11 @@ async function runSingleStageStep(
     temperature:  0.1,
   })
 
-  const critiqueRaw = critiqueResult.output as any
+  const critiqueRaw = critiqueResult.output as {
+    score?:  number
+    passed?: boolean
+    issues?: SelfCritique['issues']
+  } | null
   const selfCritique: SelfCritique = {
     score:  typeof critiqueRaw?.score === 'number' ? critiqueRaw.score : 0.5,
     passed: critiqueRaw?.passed ?? (critiqueRaw?.score ?? 0.5) >= run.config.selfCritiqueThreshold,
@@ -302,8 +308,8 @@ async function runQualityCouncilStep(run: ProjectRun): Promise<StageStepResult> 
 
   const dimensions: SandboxDimension[] = ['security', 'performance', 'seo', 'a11y', 'best_practices']
 
-  const backendFiles = (run.stages.backend?.finalOutput as any)?.files ?? []
-  const frontendFiles = (run.stages.frontend?.finalOutput as any)?.files ?? []
+  const backendFiles = (run.stages.backend?.finalOutput as { files?: GeneratedFile[] } | null)?.files ?? []
+  const frontendFiles = (run.stages.frontend?.finalOutput as { files?: GeneratedFile[] } | null)?.files ?? []
   const allFiles = [...backendFiles, ...frontendFiles]
 
   // Promise.all dentro de um único step — todas as 5 análises persistem
@@ -315,12 +321,24 @@ async function runQualityCouncilStep(run: ProjectRun): Promise<StageStepResult> 
   const verdicts = reports.map(r => r.verdict)
   const overallPassed = !verdicts.includes('fail')
 
+  // Quality Council não passa pelo Complexity Router (tier fixo por
+  // dimensão, ver DIMENSION_TOOLING em sandbox-runner.ts) — as 3 dimensões
+  // do RouterOutput não se aplicam individualmente aqui.
+  const notApplicable = { score: 0.5, rationale: 'Quality Council usa tier fixo por dimensão — não passa pelo Complexity Router.' }
+
   return {
     iteration: {
       iterationNumber: (run.stages.quality_council?.iterations.length ?? 0) + 1,
       operation:    STAGE_OPERATIONS.quality_council,
-      routerOutput: { tier: 2, confidence: 1, dimensions: {} as any, reason: 'Quality Council — tier fixo por dimensão', escalationHint: null },
-      selectionResult: {} as any,  // não há um único modelo — cada dimensão tem o seu, já registrado em `reports`
+      routerOutput: {
+        tier: 2,
+        confidence: 1,
+        dimensions: { ambiguity: notApplicable, criticality: notApplicable, novelty: notApplicable },
+        reason: 'Quality Council — tier fixo por dimensão',
+        escalationHint: null,
+      },
+      // selectionResult fica ausente — não há um único modelo, cada
+      // dimensão usa sua própria ferramenta (já registrado em `reports`).
       agentOutput:  reports,
       selfCritique: { score: overallPassed ? 1 : 0.4, passed: overallPassed, issues: [] },
       startedAt:    new Date().toISOString(),

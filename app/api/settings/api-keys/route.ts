@@ -46,6 +46,9 @@ export async function DELETE(req: NextRequest) {
   if (!user) return unauthorizedResponse()
 
   const body = (await req.json()) as { provider: string }
+  if (!body.provider) {
+    return NextResponse.json({ error: 'provider é obrigatório.' }, { status: 400 })
+  }
 
   // Em produção:
   // await supabase.from('user_api_keys').delete()

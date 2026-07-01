@@ -5,6 +5,7 @@
 
 import HumanGate from '@/components/HumanGate'
 
-export default function RunPage({ params }: { params: { runId: string } }) {
-  return <HumanGate runId={params.runId} />
+export default async function RunPage({ params }: { params: Promise<{ runId: string }> }) {
+  const { runId } = await params
+  return <HumanGate runId={runId} />
 }
