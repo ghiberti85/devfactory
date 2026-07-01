@@ -1,0 +1,48 @@
+{
+  "name": "devfactory",
+  "version": "0.2.0",
+  "private": true,
+  "scripts": {
+    "dev":          "next dev",
+    "build":        "next build",
+    "start":        "next start",
+    "lint":         "eslint . --ext .ts,.tsx,.jsx --max-warnings 0",
+    "typecheck":    "tsc --noEmit",
+    "test":         "vitest run",
+    "test:watch":   "vitest",
+    "test:ui":      "vitest --ui",
+    "test:cover":   "vitest run --coverage",
+    "test:e2e":     "playwright test",
+    "test:e2e:ui":  "playwright test --ui",
+    "test:a11y":    "playwright test __tests__/e2e/a11y.spec.ts",
+    "test:all":     "vitest run && playwright test",
+    "db:seed":      "tsx scripts/seed-models.ts"
+  },
+  "dependencies": {
+    "next":                    "^15.0.0",
+    "react":                   "^19.0.0",
+    "react-dom":               "^19.0.0",
+    "recharts":                "^2.12.0",
+    "workflow":                "latest",
+    "@workflow/ai":            "latest",
+    "@vercel/sandbox":         "latest",
+    "zod":                     "^3.23.0",
+    "@supabase/ssr":           "^0.5.0",
+    "@supabase/supabase-js":   "^2.45.0"
+  },
+  "devDependencies": {
+    "typescript":              "^5.6.0",
+    "@types/node":             "^22.0.0",
+    "@types/react":            "^19.0.0",
+    "@types/react-dom":        "^19.0.0",
+    "vitest":                  "^2.0.0",
+    "@vitest/coverage-v8":     "^2.0.0",
+    "@vitest/ui":              "^2.0.0",
+    "msw":                     "^2.4.0",
+    "@playwright/test":        "^1.45.0",
+    "@axe-core/playwright":    "^4.9.0",
+    "tsx":                     "^4.16.0",
+    "eslint":                  "^9.0.0",
+    "eslint-config-next":      "^15.0.0"
+  }
+}

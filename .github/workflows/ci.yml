@@ -1,0 +1,132 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+env:
+  NODE_VERSION: '22'
+
+jobs:
+  # ── Typecheck e lint ──────────────────────────────────────────────────────
+  typecheck:
+    name: TypeScript + Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+      - run: npm ci
+      - name: TypeScript
+        run: npx tsc --noEmit
+      - name: ESLint
+        run: npx eslint . --ext .ts,.tsx,.jsx --max-warnings 0
+
+  # ── Testes unitários e de integração ─────────────────────────────────────
+  test:
+    name: Unit + Integration Tests
+    runs-on: ubuntu-latest
+    needs: typecheck
+    env:
+      # Variáveis mínimas para testes (providers mockados via MSW)
+      NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+      - run: npm ci
+      - name: Run tests with coverage
+        run: npx vitest run --coverage
+      - name: Coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage/
+      - name: Coverage threshold check
+        run: |
+          npx vitest run --coverage --reporter=json
+          node -e "
+            const cov = require('./coverage/coverage-summary.json');
+            const stmts = cov.total.statements.pct;
+            const branches = cov.total.branches.pct;
+            if (stmts < 70) { console.error('Statements coverage ' + stmts + '% < 70%'); process.exit(1); }
+            if (branches < 65) { console.error('Branch coverage ' + branches + '% < 65%'); process.exit(1); }
+            console.log('Coverage OK — statements:', stmts + '%, branches:', branches + '%');
+          "
+
+  # ── Segurança SAST ────────────────────────────────────────────────────────
+  security:
+    name: Security (Semgrep)
+    runs-on: ubuntu-latest
+    needs: typecheck
+    steps:
+      - uses: actions/checkout@v4
+      - name: Semgrep SAST
+        uses: returntocorp/semgrep-action@v1
+        with:
+          config: >-
+            p/typescript
+            p/nextjs
+            p/secrets
+            p/owasp-top-ten
+      - name: Audit npm dependencies
+        run: npm audit --audit-level=high
+
+  # ── Testes E2E e acessibilidade ───────────────────────────────────────────
+  e2e:
+    name: E2E + Accessibility
+    runs-on: ubuntu-latest
+    needs: [typecheck, test]
+    env:
+      NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+      PLATFORM_GOOGLE_FREE_TIER_KEY: ${{ secrets.PLATFORM_GOOGLE_FREE_TIER_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+      - run: npm ci
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+      - name: Build
+        run: npm run build
+      - name: E2E tests
+        run: npx playwright test
+      - name: Upload Playwright report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7
+
+  # ── Performance budget ────────────────────────────────────────────────────
+  lighthouse:
+    name: Performance (Lighthouse CI)
+    runs-on: ubuntu-latest
+    needs: [typecheck, test]
+    if: github.event_name == 'pull_request'  # só em PRs para economizar tempo
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+      - run: npm ci && npm run build
+      - name: Lighthouse CI
+        uses: treosh/lighthouse-ci-action@v11
+        with:
+          urls: |
+            http://localhost:3000/dashboard
+          budgetPath: '.github/lighthouse-budget.json'
+          uploadArtifacts: true
+          temporaryPublicStorage: true

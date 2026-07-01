@@ -1,0 +1,50 @@
+stateDiagram-v2
+    [*] --> running : start(runDevFactoryPipeline)\nvia POST /api/runs
+
+    state running {
+        [*] --> stage_loop
+
+        state stage_loop {
+            [*] --> execute_step
+            execute_step --> self_critique : "use step"\nrouter + selector + agent
+
+            state self_critique {
+                [*] --> evaluating
+                evaluating --> gate_pending  : score ≥ threshold
+                evaluating --> execute_step  : score < threshold\n+ retries left (tier++)
+                evaluating --> gate_pending  : max retries reached
+            }
+
+            state gate_pending {
+                [*] --> hook_created : humanGateHook.create({ token })\npersistAwaitingHumanStep ("use step")
+                hook_created --> suspended : await hook
+                note right of suspended
+                    Workflow PAUSADO aqui.
+                    Zero custo de compute.
+                    Sobrevive a deploy/crash.
+                    Minutos a meses.
+                end note
+                suspended --> resumed : POST /api/runs/[id]/gate\n→ humanGateHook.resume(token, decision)
+            }
+
+            gate_pending --> next_stage : approved / edited
+            gate_pending --> execute_step : rejected + feedback\n+ retries left
+            gate_pending --> failed : rejected\n+ max retries reached
+        }
+
+        stage_loop --> stage_loop : próxima etapa\n(getPipelineStages)
+        stage_loop --> completed : todas as etapas aprovadas
+    }
+
+    running --> failed : FatalError\n(ex: BYOK sem key paga)
+
+    completed --> [*]
+    failed --> [*]
+
+    note left of running
+        Quality Council intercepta o loop:
+        roda 5 dimensões em paralelo dentro
+        de um único "use step", cada uma
+        executando em Vercel Sandbox isolado
+        (runQualityCheckInSandbox).
+    end note
