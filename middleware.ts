@@ -20,5 +20,8 @@ export function middleware(req: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/((?!_next/static|_next/image|favicon.ico).*)'],
+  // .well-known/workflow/* fica de fora: são as chamadas internas do Workflow
+  // SDK (resume de steps/hooks) — interceptá-las com o gate de auth acima
+  // quebra a execução/retomada dos workflows.
+  matcher: ['/((?!_next/static|_next/image|favicon.ico|.well-known/workflow/).*)'],
 }

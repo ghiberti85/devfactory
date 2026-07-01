@@ -18,6 +18,7 @@ const eslintConfig = [
       'playwright-report/**',
       'test-results/**',
       'next-env.d.ts',
+      'app/.well-known/workflow/**',
     ],
   },
   ...compat.extends('next/core-web-vitals', 'next/typescript'),
