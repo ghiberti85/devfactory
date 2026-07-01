@@ -24,9 +24,10 @@
 import { NextRequest } from 'next/server'
 import { getSessionUser, unauthorizedResponse } from '@/lib/devfactory/auth'
 
-// 800s é o máximo GA do Fluid Compute em planos Pro/Enterprise (confirmado
-// via docs.vercel.com/functions/limitations). Hobby fica em 300s.
-export const maxDuration = 800
+// 300s é o teto do plano Hobby (confirmado em produção: a Vercel rejeita o
+// deploy com "invalid_max_duration" acima disso). Planos Pro/Enterprise com
+// Fluid Compute suportam até 800s — subir esse valor quando o projeto migrar.
+export const maxDuration = 300
 
 const POLL_INTERVAL_MS = 2000
 const MAX_STREAM_MS     = (maxDuration - 30) * 1000
