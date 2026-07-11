@@ -23,6 +23,7 @@
 
 import { NextRequest } from 'next/server'
 import { getSessionUser, unauthorizedResponse } from '@/lib/devfactory/auth'
+import { createSupabaseServerClient } from '@/lib/devfactory/supabase'
 
 // 300s é o teto do plano Hobby (confirmado em produção: a Vercel rejeita o
 // deploy com "invalid_max_duration" acima disso). Planos Pro/Enterprise com
@@ -41,18 +42,20 @@ interface RunSnapshot {
   [key: string]: unknown
 }
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars -- usados na query real comentada abaixo
-async function fetchRunSnapshot(runId: string, userId: string): Promise<RunSnapshot | null> {
-  // Em produção:
-  // const { data } = await supabase
-  //   .from('pipeline_runs')
-  //   .select('*, stage_outputs(*, stage_iterations(*))')
-  //   .eq('id', runId)
-  //   .eq('user_id', userId)
-  //   .single()
-  // return data
+async function fetchRunSnapshot(
+  req: NextRequest,
+  runId: string,
+  userId: string,
+): Promise<RunSnapshot | null> {
+  const supabase = createSupabaseServerClient(req)
+  const { data } = await supabase
+    .from('pipeline_runs')
+    .select('*, stage_outputs(*, stage_iterations(*))')
+    .eq('id', runId)
+    .eq('user_id', userId)
+    .single()
 
-  return null  // placeholder — implementar a query acima
+  return data as RunSnapshot | null
 }
 
 export async function GET(
@@ -71,7 +74,7 @@ export async function GET(
       const startedAt = Date.now()
 
       while (Date.now() - startedAt < MAX_STREAM_MS) {
-        const snapshot = await fetchRunSnapshot(runId, user.id)
+        const snapshot = await fetchRunSnapshot(req, runId, user.id)
 
         if (!snapshot) {
           controller.enqueue(encoder.encode(encodeSSE('run.not_found', { runId })))

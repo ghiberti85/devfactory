@@ -8,19 +8,25 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { getSessionUser, unauthorizedResponse } from '@/lib/devfactory/auth'
+import { createSupabaseServerClient } from '@/lib/devfactory/supabase'
+import { encryptSecret } from '@/lib/devfactory/crypto'
 
 export async function GET(req: NextRequest) {
   const user = await getSessionUser(req)
   if (!user) return unauthorizedResponse()
 
-  // Em produção:
-  // const { data } = await supabase
-  //   .from('user_api_keys')
-  //   .select('provider, created_at')
-  //   .eq('user_id', user.id)
-  // (nunca retornar a key em texto puro — só os providers configurados)
+  const supabase = createSupabaseServerClient(req)
+  const { data, error } = await supabase
+    .from('user_api_keys')
+    .select('provider, created_at')
+    .eq('user_id', user.id)
 
-  return NextResponse.json({ providers: [] })
+  if (error) {
+    return NextResponse.json({ error: `Falha ao listar API keys: ${error.message}` }, { status: 500 })
+  }
+
+  // Nunca retorna a key em texto puro — só os providers configurados.
+  return NextResponse.json({ providers: data ?? [] })
 }
 
 export async function POST(req: NextRequest) {
@@ -32,11 +38,17 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'provider e apiKey são obrigatórios.' }, { status: 400 })
   }
 
-  // Em produção:
-  // const encrypted = await encryptViaVault(body.apiKey)
-  // await supabase.from('user_api_keys').upsert({
-  //   user_id: user.id, provider: body.provider, encrypted_key: encrypted,
-  // }, { onConflict: 'user_id,provider' })
+  const encrypted = encryptSecret(body.apiKey)
+  const supabase = createSupabaseServerClient(req)
+  const { error } = await supabase.from('user_api_keys').upsert({
+    user_id:       user.id,
+    provider:      body.provider,
+    encrypted_key: encrypted,
+  }, { onConflict: 'user_id,provider' })
+
+  if (error) {
+    return NextResponse.json({ error: `Falha ao salvar a API key: ${error.message}` }, { status: 500 })
+  }
 
   return NextResponse.json({ ok: true, provider: body.provider })
 }
@@ -50,9 +62,13 @@ export async function DELETE(req: NextRequest) {
     return NextResponse.json({ error: 'provider é obrigatório.' }, { status: 400 })
   }
 
-  // Em produção:
-  // await supabase.from('user_api_keys').delete()
-  //   .eq('user_id', user.id).eq('provider', body.provider)
+  const supabase = createSupabaseServerClient(req)
+  const { error } = await supabase.from('user_api_keys').delete()
+    .eq('user_id', user.id).eq('provider', body.provider)
+
+  if (error) {
+    return NextResponse.json({ error: `Falha ao remover a API key: ${error.message}` }, { status: 500 })
+  }
 
   return NextResponse.json({ ok: true })
 }

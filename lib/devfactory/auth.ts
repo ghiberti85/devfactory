@@ -8,24 +8,18 @@
  */
 
 import { NextRequest } from 'next/server'
-// Em produção:
-// import { createServerClient } from '@supabase/ssr'
-// import { cookies } from 'next/headers'
+import { createSupabaseServerClient } from './supabase'
 
 export interface SessionUser {
   id: string
   email: string
 }
 
-export async function getSessionUser(_req: NextRequest): Promise<SessionUser | null> {
-  // Em produção:
-  // const supabase = createServerClient(url, anonKey, { cookies: () => cookies() })
-  // const { data: { user } } = await supabase.auth.getUser()
-  // if (!user) return null
-  // return { id: user.id, email: user.email! }
-
-  // Placeholder de desenvolvimento — substitua pela integração real acima.
-  return { id: 'usr_dev_placeholder', email: 'dev@devfactory.app' }
+export async function getSessionUser(req: NextRequest): Promise<SessionUser | null> {
+  const supabase = createSupabaseServerClient(req)
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user || !user.email) return null
+  return { id: user.id, email: user.email }
 }
 
 export function unauthorizedResponse() {

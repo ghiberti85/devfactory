@@ -38,6 +38,7 @@ import { createRouter, type RouterProvider } from './complexity-router'
 import { createAgentRunner, resolveProviderConfig, type AgentProvider } from './agent-runner'
 import { getUserKeyring } from './run-registry'
 import { runQualityCheckInSandbox, type QualityDimension as SandboxDimension, type GeneratedFile } from './sandbox-runner'
+import { createSupabaseServiceClient } from './supabase'
 
 // ─── Hook: gate humano ──────────────────────────────────────────────────────
 // Um único hook reutilizável; o token muda por run+etapa+iteração, então
@@ -358,17 +359,46 @@ async function runQualityCouncilStep(run: ProjectRun): Promise<StageStepResult> 
 
 async function persistAwaitingHumanStep(runId: string, stage: PipelineStage, token: string): Promise<void> {
   'use step'
-  // Em produção:
-  // await supabase.from('pipeline_runs').update({ status: 'awaiting_human', current_stage: stage }).eq('id', runId)
-  // await supabase.from('stage_outputs').update({ status: 'awaiting_human', gate_token: token })
-  //   .eq('run_id', runId).eq('stage', stage)
-  console.log(`[DevFactory] Run ${runId} aguardando humano em "${stage}" (token: ${token})`)
+  // Roda dentro de um step do Workflow SDK — sem cookies de sessão HTTP
+  // disponíveis, por isso usa o client service_role (ver comentário no topo
+  // de supabase.ts). Escopado por PK (id do run), não por user_id.
+  const supabase = createSupabaseServiceClient()
+
+  await supabase.from('pipeline_runs').update({
+    status: 'awaiting_human',
+    current_stage: stage,
+  }).eq('id', runId)
+
+  await supabase.from('stage_outputs').upsert({
+    run_id: runId,
+    stage,
+    status: 'awaiting_human',
+    gate_token: token,
+  }, { onConflict: 'run_id,stage' })
 }
 
 async function persistGateDecisionStep(runId: string, stage: PipelineStage, decision: HumanGateDecision): Promise<void> {
   'use step'
-  // Em produção: insert em `human_gates` + update em `stage_outputs.status`
-  console.log(`[DevFactory] Run ${runId} / "${stage}" → ${decision.decision}`)
+  const supabase = createSupabaseServiceClient()
+
+  const { data: stageOutput } = await supabase
+    .from('stage_outputs')
+    .select('id')
+    .eq('run_id', runId)
+    .eq('stage', stage)
+    .single()
+
+  if (stageOutput) {
+    await supabase.from('human_gates').insert({
+      stage_output_id: stageOutput.id,
+      decision: decision.decision,
+      feedback: decision.feedback,
+      edited_output: decision.editedOutput,
+    })
+    await supabase.from('stage_outputs').update({
+      status: decision.decision === 'rejected' ? 'rejected' : 'approved',
+    }).eq('id', stageOutput.id)
+  }
 }
 
 // ─── Reducers puros (mesma disciplina do orchestrator.ts original) ─────────

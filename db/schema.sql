@@ -139,6 +139,7 @@ create table pipeline_runs (
   user_id      uuid references auth.users(id) not null,
   status       text default 'running',
   current_stage text,
+  workflow_run_id text, -- runId retornado por start() (Vercel Workflow SDK) — usado por getRun()/cancel()
   started_at   timestamptz default now(),
   completed_at timestamptz,
   total_cost_usd numeric(10,6) default 0,
@@ -161,9 +162,11 @@ create table stage_outputs (
   stage        text not null,
   status       text default 'pending',
   final_output jsonb,
+  gate_token   text, -- token do humanGateHook ativo nesta etapa (ver pipeline-workflow.ts)
   iteration_count int default 0,
   started_at   timestamptz default now(),
-  completed_at timestamptz
+  completed_at timestamptz,
+  unique(run_id, stage)
 );
 
 alter table stage_outputs enable row level security;

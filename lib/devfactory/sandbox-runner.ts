@@ -88,7 +88,7 @@ export async function runTestsInSandbox(
     if (install.exitCode !== 0) {
       return {
         passed: false, exitCode: install.exitCode,
-        stdout: await readAll(install.stdout), stderr: await readAll(install.stderr),
+        stdout: await install.stdout(), stderr: await install.stderr(),
         durationMs: Date.now() - startedAt,
       }
     }
@@ -103,8 +103,8 @@ export async function runTestsInSandbox(
     return {
       passed:     result.exitCode === 0,
       exitCode:   result.exitCode,
-      stdout:     await readAll(result.stdout),
-      stderr:     await readAll(result.stderr),
+      stdout:     await result.stdout(),
+      stderr:     await result.stderr(),
       durationMs: Date.now() - startedAt,
     }
   } finally {
@@ -138,7 +138,7 @@ export async function runQualityCheckInSandbox(
 
     const [cmd, ...args] = tooling.runCmd
     const result = await sandbox.runCommand({ cmd, args })
-    const rawOutput = await readAll(result.stdout)
+    const rawOutput = await result.stdout()
 
     return parseToolOutput(dimension, tooling.tool, rawOutput, result.exitCode)
   } catch (err) {
@@ -151,25 +151,9 @@ export async function runQualityCheckInSandbox(
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 async function writeFiles(sandbox: InstanceType<typeof Sandbox>, files: GeneratedFile[]): Promise<void> {
-  // A API exata de escrita de arquivos deve ser conferida na doc atual do
-  // @vercel/sandbox (vercel.com/docs/vercel-sandbox) — o SDK expõe gestão de
-  // arquivos além de runCommand; o nome do método pode variar entre versões.
-  for (const file of files) {
-    await sandbox.runCommand({
-      cmd: 'sh',
-      args: ['-c', `mkdir -p "$(dirname '${file.path}')" && cat > '${file.path}' << 'DEVFACTORY_EOF'\n${file.content}\nDEVFACTORY_EOF`],
-    })
-  }
-}
-
-async function readAll(stream: unknown): Promise<string> {
-  // runCommand pode retornar stdout como string já materializada ou como
-  // stream, dependendo da forma de chamada — normaliza os dois casos.
-  if (typeof stream === 'string') return stream
-  if (stream && typeof (stream as { text?: unknown }).text === 'function') {
-    return (stream as { text: () => Promise<string> }).text()
-  }
-  return String(stream ?? '')
+  // API confirmada contra os tipos publicados de @vercel/sandbox
+  // (dist/sandbox.d.ts): `sandbox.writeFiles([{ path, content, mode? }])`.
+  await sandbox.writeFiles(files.map(f => ({ path: f.path, content: f.content })))
 }
 
 function emptyResult(dimension: QualityDimension, model: string, message: string): QualityCheckResult {

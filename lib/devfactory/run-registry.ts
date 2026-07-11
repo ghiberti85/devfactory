@@ -2,33 +2,41 @@
  * DevFactory — User Credentials Resolver
  * lib/devfactory/run-registry.ts
  *
- * Nome do arquivo mantido por compatibilidade com o restante do código que
- * já importa daqui — mas o conteúdo mudou bastante na migração para o
- * Vercel Workflow SDK. O que existia antes (Map em memória de runs ativos,
- * broadcastToRun, buildServices) foi removido: o Workflow SDK já resolve
- * persistência e push em tempo real (ver pipeline-workflow.ts e as rotas
- * em app/api/runs/**). Este arquivo agora cuida só de uma coisa: resolver
- * credenciais do usuário atual (BYOK de modelos LLM + token do GitHub),
- * que continuam sendo responsabilidade da aplicação, não do Workflow SDK.
+ * Resolve credenciais do usuário atual (BYOK de modelos LLM + token do
+ * GitHub). Chamado tanto de rotas de API (com sessão HTTP) quanto de dentro
+ * de steps do Workflow SDK (sem cookies de sessão disponíveis) — por isso
+ * usa o client service_role (createSupabaseServiceClient), sempre com o
+ * filtro explícito `.eq('user_id', userId)` como segunda camada de
+ * isolamento além do RLS.
  */
 
 import type { AgentProvider, ProviderKeyring } from './agent-runner'
+import { createSupabaseServiceClient } from './supabase'
+import { decryptSecret } from './crypto'
 
 // ─── Keyring de modelos LLM (BYOK) ─────────────────────────────────────────
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars -- userId será usado quando a query real ao Supabase entrar (ver comentário abaixo)
 export async function getUserKeyring(userId: string): Promise<{
   keyring: ProviderKeyring
   userProviders: AgentProvider[]
 }> {
-  // Em produção:
-  // const { data } = await supabase
-  //   .from('user_api_keys')
-  //   .select('provider, encrypted_key')
-  //   .eq('user_id', userId)
-  // const decrypted = await Promise.all(data.map(decryptViaVault))
+  const supabase = createSupabaseServiceClient()
+  const { data, error } = await supabase
+    .from('user_api_keys')
+    .select('provider, encrypted_key')
+    .eq('user_id', userId)
+
+  if (error) throw new Error(`Falha ao ler as API keys do usuário: ${error.message}`)
 
   const userKeys: Partial<Record<AgentProvider, string>> = {}
+  for (const row of data ?? []) {
+    try {
+      userKeys[row.provider as AgentProvider] = decryptSecret(row.encrypted_key)
+    } catch {
+      // Key corrompida/ilegível não deve derrubar o run inteiro — apenas
+      // fica indisponível como se o usuário não a tivesse configurado.
+    }
+  }
 
   const keyring: ProviderKeyring = {
     anthropic:  userKeys.anthropic,
@@ -53,15 +61,20 @@ export async function getUserKeyring(userId: string): Promise<{
 
 // ─── Token do GitHub (modo brownfield) ─────────────────────────────────────
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars -- userId será usado quando a query real ao Supabase entrar (ver comentário abaixo)
 export async function getUserGithubToken(userId: string): Promise<string | null> {
-  // Em produção:
-  // const { data } = await supabase
-  //   .from('user_github_connections')
-  //   .select('encrypted_token')
-  //   .eq('user_id', userId)
-  //   .single()
-  // return data ? await decryptViaVault(data.encrypted_token) : null
+  const supabase = createSupabaseServiceClient()
+  const { data, error } = await supabase
+    .from('user_github_connections')
+    .select('encrypted_token')
+    .eq('user_id', userId)
+    .maybeSingle()
 
-  return null
+  if (error) throw new Error(`Falha ao ler a conexão GitHub do usuário: ${error.message}`)
+  if (!data) return null
+
+  try {
+    return decryptSecret(data.encrypted_token)
+  } catch {
+    return null
+  }
 }

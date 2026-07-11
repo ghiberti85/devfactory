@@ -14,6 +14,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { humanGateHook } from '@/lib/devfactory/pipeline-workflow'
 import { getSessionUser, unauthorizedResponse } from '@/lib/devfactory/auth'
+import { createSupabaseServerClient } from '@/lib/devfactory/supabase'
 
 export async function POST(
   req: NextRequest,
@@ -37,7 +38,7 @@ export async function POST(
   // Validação de ownership: o token do gate só pode ser resolvido pelo
   // dono do run. Sem isso, qualquer usuário autenticado que adivinhasse um
   // token poderia interferir no run de outra pessoa.
-  const isOwner = await verifyGateTokenOwnership(body.token, user.id)
+  const isOwner = await verifyGateTokenOwnership(req, body.token, user.id)
   if (!isOwner) {
     return NextResponse.json({ error: 'Token inválido ou run não pertence a este usuário.' }, { status: 403 })
   }
@@ -58,21 +59,19 @@ export async function POST(
 
 // ─── Ownership check ──────────────────────────────────────────────────────────
 
-async function verifyGateTokenOwnership(token: string, userId: string): Promise<boolean> {
+async function verifyGateTokenOwnership(req: NextRequest, token: string, userId: string): Promise<boolean> {
   // O token tem o formato `devfactory:{runId}:{stage}:{iteration}` —
   // extrai o runId e confere contra pipeline_runs.user_id.
   const parts = token.split(':')
   if (parts.length < 4 || parts[0] !== 'devfactory') return false
   const runId = parts[1]
 
-  // Em produção:
-  // const { data } = await supabase
-  //   .from('pipeline_runs')
-  //   .select('user_id')
-  //   .eq('id', runId)
-  //   .single()
-  // return data?.user_id === userId
+  const supabase = createSupabaseServerClient(req)
+  const { data } = await supabase
+    .from('pipeline_runs')
+    .select('user_id')
+    .eq('id', runId)
+    .single()
 
-  console.log(`[DevFactory] Verificando ownership do run ${runId} para user ${userId} (placeholder — sempre true em dev)`)
-  return true
+  return data?.user_id === userId
 }

@@ -11,6 +11,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { getSessionUser, unauthorizedResponse } from '@/lib/devfactory/auth'
+import { createSupabaseServerClient } from '@/lib/devfactory/supabase'
 
 export async function GET(req: NextRequest) {
   const user = await getSessionUser(req)
@@ -33,8 +34,12 @@ export async function DELETE(req: NextRequest) {
   const user = await getSessionUser(req)
   if (!user) return unauthorizedResponse()
 
-  // Em produção:
-  // await supabase.from('user_github_connections').delete().eq('user_id', user.id)
+  const supabase = createSupabaseServerClient(req)
+  const { error } = await supabase.from('user_github_connections').delete().eq('user_id', user.id)
+
+  if (error) {
+    return NextResponse.json({ error: `Falha ao desconectar o GitHub: ${error.message}` }, { status: 500 })
+  }
 
   return NextResponse.json({ ok: true })
 }

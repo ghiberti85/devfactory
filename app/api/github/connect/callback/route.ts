@@ -4,12 +4,24 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server'
+import { getSessionUser } from '@/lib/devfactory/auth'
+import { createSupabaseServerClient } from '@/lib/devfactory/supabase'
+import { encryptSecret } from '@/lib/devfactory/crypto'
 
 export async function GET(req: NextRequest) {
   const code = req.nextUrl.searchParams.get('code')
   const state = req.nextUrl.searchParams.get('state') // user.id setado em /connect
 
   if (!code || !state) {
+    return NextResponse.redirect(new URL('/settings/api-keys?github_error=1', req.url))
+  }
+
+  // O usuário ainda precisa estar logado no navegador (cookies de sessão
+  // presentes) quando o GitHub redireciona de volta. `state` confere que a
+  // sessão atual é a mesma que iniciou o fluxo em /api/github/connect —
+  // proteção básica contra CSRF nesse redirect.
+  const sessionUser = await getSessionUser(req)
+  if (!sessionUser || sessionUser.id !== state) {
     return NextResponse.redirect(new URL('/settings/api-keys?github_error=1', req.url))
   }
 
@@ -28,11 +40,17 @@ export async function GET(req: NextRequest) {
     return NextResponse.redirect(new URL('/settings/api-keys?github_error=1', req.url))
   }
 
-  // Em produção:
-  // const encrypted = await encryptViaVault(data.access_token)
-  // await supabase.from('user_github_connections').upsert({
-  //   user_id: state, encrypted_token: encrypted, scope: data.scope,
-  // }, { onConflict: 'user_id' })
+  const encrypted = encryptSecret(data.access_token)
+  const supabase = createSupabaseServerClient(req)
+  const { error } = await supabase.from('user_github_connections').upsert({
+    user_id: state,
+    encrypted_token: encrypted,
+    scope: data.scope,
+  }, { onConflict: 'user_id' })
+
+  if (error) {
+    return NextResponse.redirect(new URL('/settings/api-keys?github_error=1', req.url))
+  }
 
   return NextResponse.redirect(new URL('/settings/api-keys?github_connected=1', req.url))
 }

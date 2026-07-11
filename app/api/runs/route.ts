@@ -16,6 +16,7 @@ import { createProjectRun, type RunConfig } from '@/lib/devfactory/types'
 import { fetchRepoContext, repoContextToPromptSummary, type GitHubRepoRef } from '@/lib/devfactory/github-connector'
 import { getUserGithubToken, getUserKeyring } from '@/lib/devfactory/run-registry'
 import { getSessionUser, unauthorizedResponse } from '@/lib/devfactory/auth'
+import { createSupabaseServerClient } from '@/lib/devfactory/supabase'
 
 export async function POST(req: NextRequest) {
   const user = await getSessionUser(req)
@@ -75,13 +76,29 @@ export async function POST(req: NextRequest) {
     userProviders,
   })
 
-  // ⚠️ Verificar a assinatura exata de start() na doc atual do Workflow SDK
-  // (useworkflow.dev/docs/api-reference/workflow-api/start) antes de rodar —
-  // confirmei via busca que `start` é exportado de 'workflow/api' e que
-  // workflows são disparados a partir de rotas normais (não de dentro de
-  // outro workflow sem estar envolto em step), mas não tive um exemplo
-  // completo da forma de chamada/retorno no momento em que escrevi isto.
-  const { runId } = await start(runDevFactoryPipeline, [{ run }])
+  // Cria a linha de pipeline_runs ANTES de start() — os steps de persistência
+  // do workflow (pipeline-workflow.ts) fazem UPDATE por id a partir daqui, e
+  // o dashboard/stream precisam encontrar a linha desde o primeiro poll.
+  const supabase = createSupabaseServerClient(req)
+  const { error: insertError } = await supabase.from('pipeline_runs').insert({
+    id:            run.id,
+    project_id:    run.projectId,
+    user_id:       user.id,
+    status:        'running',
+    current_stage: null,
+  })
+  if (insertError) {
+    return NextResponse.json({ error: `Falha ao registrar o run: ${insertError.message}` }, { status: 500 })
+  }
 
-  return NextResponse.json({ runId, status: 'started' }, { status: 201 })
+  // start() retorna um objeto Run<TResult> (não `{ runId }`) — confirmado
+  // contra os tipos publicados de 'workflow' (dist/api.d.ts): `runId` é uma
+  // propriedade da instância de Run, junto com .cancel(), .status etc.
+  const run_ = await start(runDevFactoryPipeline, [{ run }])
+
+  // Registra o runId do Workflow SDK (distinto do id interno usado nas URLs)
+  // para que GET/DELETE em [runId]/route.ts consigam chamar getRun() depois.
+  await supabase.from('pipeline_runs').update({ workflow_run_id: run_.runId }).eq('id', run.id)
+
+  return NextResponse.json({ runId: run.id, status: 'started' }, { status: 201 })
 }
