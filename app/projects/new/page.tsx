@@ -14,19 +14,36 @@ export default function NewProjectPage() {
   async function handleSubmit({
     projectName,
     briefing,
+    githubRepo,
     config,
   }: {
     projectName: string
     briefing: string
+    githubRepo?: { owner: string; repo: string; branch?: string }
     config: Record<string, unknown>
   }) {
+    const projectRes = await fetch('/api/projects', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ projectName, briefing, githubRepo, config }),
+    })
+
+    if (!projectRes.ok) {
+      const { error } = await projectRes.json().catch(() => ({ error: 'Falha ao criar o projeto.' }))
+      alert(error)
+      return
+    }
+
+    const { projectId } = await projectRes.json()
+
     const res = await fetch('/api/runs', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        projectId: crypto.randomUUID(),
+        projectId,
         projectName,
         briefing,
+        githubRepo,
         config,
       }),
     })
