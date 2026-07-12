@@ -16,6 +16,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getRun } from 'workflow/api'
 import { getSessionUser, unauthorizedResponse } from '@/lib/devfactory/auth'
 import { createSupabaseServerClient } from '@/lib/devfactory/supabase'
+import { mapDbRunToProjectRun, type DbPipelineRunRow, type DbProjectRow } from '@/lib/devfactory/run-mapper'
 
 export async function GET(
   req: NextRequest,
@@ -29,7 +30,7 @@ export async function GET(
 
   const { data: run, error } = await supabase
     .from('pipeline_runs')
-    .select('*, stage_outputs(*, stage_iterations(*))')
+    .select('*, stage_outputs(*, stage_iterations(*), quality_reports(*)), projects(*)')
     .eq('id', runId)
     .single()
 
@@ -42,12 +43,18 @@ export async function GET(
     return NextResponse.json({ error: 'Sem acesso.' }, { status: 403 })
   }
 
+  const project = run.projects as unknown as DbProjectRow
+  const qualityReportRows = (run.stage_outputs ?? []).flatMap(
+    (so: { quality_reports?: unknown[] }) => so.quality_reports ?? [],
+  )
+  const projectRun = mapDbRunToProjectRun(run as unknown as DbPipelineRunRow, project, qualityReportRows as never[])
+
   if ((run.status === 'completed' || run.status === 'failed') && run.workflow_run_id) {
     try {
       const workflowRun = getRun(run.workflow_run_id)
       if (await workflowRun.exists) {
         const finalOutput = await workflowRun.returnValue
-        return NextResponse.json({ ...run, finalOutput })
+        return NextResponse.json({ ...projectRun, finalOutput })
       }
     } catch {
       // getRun pode já ter expirado a retenção — não é fatal, o snapshot do
@@ -55,7 +62,7 @@ export async function GET(
     }
   }
 
-  return NextResponse.json(run)
+  return NextResponse.json(projectRun)
 }
 
 export async function DELETE(

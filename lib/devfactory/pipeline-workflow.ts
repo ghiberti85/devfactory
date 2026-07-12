@@ -139,6 +139,7 @@ async function runStageWithGate(run: ProjectRun, stage: PipelineStage): Promise<
   let lastIterationRecord: StageIteration | null = null
 
   run = initStage(run, stage)
+  await persistStageStartedStep(run.id, stage)
 
   while (iteration < run.config.maxIterationsPerStage) {
     iteration++
@@ -153,6 +154,8 @@ async function runStageWithGate(run: ProjectRun, stage: PipelineStage): Promise<
     if (stage === 'quality_council') {
       run = { ...run, qualityReports: stepResult.qualityReports ?? [] }
     }
+
+    await persistIterationStep(run.id, stage, stepResult, run.totalCostUsd)
 
     if (stepResult.iteration.selfCritique.passed) break
     tier = Math.min((tier + 1) as Tier, 3) as Tier  // progressive escalation
@@ -177,7 +180,8 @@ async function runStageWithGate(run: ProjectRun, stage: PipelineStage): Promise<
   // não no momento em que o gate foi criado.
   const decision: HumanGateDecision = { ...rawDecision, decidedAt: new Date().toISOString() }
 
-  await persistGateDecisionStep(run.id, stage, decision)  // "use step"
+  const finalOutput = decision.editedOutput ?? lastIterationRecord?.agentOutput
+  await persistGateDecisionStep(run.id, stage, decision, finalOutput)  // "use step"
 
   if (decision.decision === 'rejected') {
     if (iteration < run.config.maxIterationsPerStage) {
@@ -357,6 +361,74 @@ async function runQualityCouncilStep(run: ProjectRun): Promise<StageStepResult> 
 
 // ─── Steps de persistência (gravam estado no Postgres p/ o Dashboard/UI) ───
 
+async function persistStageStartedStep(runId: string, stage: PipelineStage): Promise<void> {
+  'use step'
+  const supabase = createSupabaseServiceClient()
+
+  await supabase.from('pipeline_runs').update({
+    status: 'running',
+    current_stage: stage,
+  }).eq('id', runId)
+
+  await supabase.from('stage_outputs').upsert({
+    run_id: runId,
+    stage,
+    status: 'running',
+  }, { onConflict: 'run_id,stage', ignoreDuplicates: false })
+}
+
+async function persistIterationStep(
+  runId: string,
+  stage: PipelineStage,
+  stepResult: StageStepResult,
+  runTotalCostUsd: number,
+): Promise<void> {
+  'use step'
+  const supabase = createSupabaseServiceClient()
+
+  const { data: stageOutput } = await supabase
+    .from('stage_outputs')
+    .select('id')
+    .eq('run_id', runId)
+    .eq('stage', stage)
+    .single()
+
+  if (!stageOutput) return
+
+  const iteration = stepResult.iteration
+  await supabase.from('stage_iterations').insert({
+    stage_output_id:  stageOutput.id,
+    iteration_number: iteration.iterationNumber,
+    operation:        iteration.operation,
+    model_id:         null, // model_id é FK para o catálogo (models.id) — a seleção guarda modelId/provider como string, não o uuid do catálogo
+    tier_used:        iteration.routerOutput.tier,
+    prompt:           null, // prompts não são persistidos (podem conter contexto sensível do briefing) — só input/output relevantes
+    output:           iteration.agentOutput,
+    self_critique:    iteration.selfCritique,
+    status:           iteration.selfCritique.passed ? 'passed' : 'retrying',
+  })
+
+  await supabase.from('stage_outputs').update({
+    iteration_count: iteration.iterationNumber,
+  }).eq('id', stageOutput.id)
+
+  if (stage === 'quality_council' && stepResult.qualityReports) {
+    await supabase.from('quality_reports').insert(
+      stepResult.qualityReports.map(r => ({
+        stage_output_id: stageOutput.id,
+        dimension:       r.dimension,
+        tool_used:       r.model,
+        model_analysis:  r.model,
+        score:           r.score,
+        issues:          r.issues,
+        verdict:         r.verdict,
+      })),
+    )
+  }
+
+  await supabase.from('pipeline_runs').update({ total_cost_usd: runTotalCostUsd }).eq('id', runId)
+}
+
 async function persistAwaitingHumanStep(runId: string, stage: PipelineStage, token: string): Promise<void> {
   'use step'
   // Roda dentro de um step do Workflow SDK — sem cookies de sessão HTTP
@@ -377,7 +449,12 @@ async function persistAwaitingHumanStep(runId: string, stage: PipelineStage, tok
   }, { onConflict: 'run_id,stage' })
 }
 
-async function persistGateDecisionStep(runId: string, stage: PipelineStage, decision: HumanGateDecision): Promise<void> {
+async function persistGateDecisionStep(
+  runId: string,
+  stage: PipelineStage,
+  decision: HumanGateDecision,
+  finalOutput: unknown,
+): Promise<void> {
   'use step'
   const supabase = createSupabaseServiceClient()
 
@@ -396,7 +473,9 @@ async function persistGateDecisionStep(runId: string, stage: PipelineStage, deci
       edited_output: decision.editedOutput,
     })
     await supabase.from('stage_outputs').update({
-      status: decision.decision === 'rejected' ? 'rejected' : 'approved',
+      status:       decision.decision === 'rejected' ? 'rejected' : 'approved',
+      final_output: decision.decision === 'rejected' ? null : finalOutput,
+      completed_at: decision.decision === 'rejected' ? null : new Date().toISOString(),
     }).eq('id', stageOutput.id)
   }
 }
