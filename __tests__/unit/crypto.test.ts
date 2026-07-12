@@ -21,7 +21,7 @@ describe('crypto secrets', () => {
 
   it('throws when the auth tag does not match (tampered ciphertext)', () => {
     const encrypted = encryptSecret('sensitive-key')
-    const [iv, tag, ciphertext] = encrypted.split('.')
+    const [iv, tag] = encrypted.split('.')
     const tampered = [iv, tag, Buffer.from('tampered').toString('base64')].join('.')
     expect(() => decryptSecret(tampered)).toThrow()
   })

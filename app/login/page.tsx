@@ -5,28 +5,29 @@
 
 'use client'
 
-import { useRouter } from 'next/navigation'
 import AuthGate from '@/components/AuthGate'
-// Em produção:
-// import { createBrowserClient } from '@supabase/ssr'
+import { createSupabaseBrowserClient } from '@/lib/devfactory/supabase-browser'
 
 export default function LoginPage() {
-  const router = useRouter()
-
   async function handleLogin({ provider, email }: { provider: string; email?: string }) {
-    // Em produção:
-    // const supabase = createBrowserClient(url, anonKey)
-    // if (provider === 'magic') {
-    //   const { error } = await supabase.auth.signInWithOtp({ email })
-    //   if (error) throw error
-    //   return // usuário clica no link do email e cai em /dashboard
-    // }
-    // const { error } = await supabase.auth.signInWithOAuth({ provider })
-    // if (error) throw error
+    const supabase = createSupabaseBrowserClient()
+    const redirectTo = `${window.location.origin}/auth/callback`
 
-    // Placeholder de desenvolvimento:
-    console.log('login', { provider, email })
-    router.push('/dashboard')
+    if (provider === 'magic') {
+      const { error } = await supabase.auth.signInWithOtp({
+        email: email!,
+        options: { emailRedirectTo: redirectTo },
+      })
+      if (error) throw error
+      return // usuário clica no link do email e cai em /auth/callback → /dashboard
+    }
+
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: provider as 'github' | 'google',
+      options: { redirectTo },
+    })
+    if (error) throw error
+    // signInWithOAuth já redireciona o browser — nada a fazer depois daqui.
   }
 
   return <AuthGate onLogin={handleLogin} />
