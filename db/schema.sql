@@ -82,6 +82,31 @@ create policy "users manage only their own github connection"
   using (auth.uid() = user_id)
   with check (auth.uid() = user_id);
 
+-- ─── Vercel — conexão por usuário (deploy automático) ──────────────────────
+-- Mesmo princípio: token do usuário, nunca compartilhado. refresh_token é
+-- necessário porque o deploy pode acontecer muito depois da conexão (ex:
+-- usuário aprova o gate humano dias depois) — access_token de curta duração
+-- sozinho não seria suficiente.
+
+create table user_vercel_connections (
+  id                     uuid primary key default gen_random_uuid(),
+  user_id                uuid references auth.users(id) not null unique,
+  encrypted_access_token  text not null,
+  encrypted_refresh_token text,
+  team_id                text, -- time Vercel selecionado como alvo do deploy (null = conta pessoal)
+  vercel_user_id         text,
+  scope                  text,
+  expires_at             timestamptz,
+  connected_at           timestamptz default now()
+);
+
+alter table user_vercel_connections enable row level security;
+
+create policy "users manage only their own vercel connection"
+  on user_vercel_connections for all
+  using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
+
 -- ─── Projetos ──────────────────────────────────────────────────────────────
 
 create table projects (

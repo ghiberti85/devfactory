@@ -233,6 +233,79 @@ function GitHubConnectionCard() {
   )
 }
 
+function VercelConnectionCard() {
+  const [status, setStatus] = useState("loading") // 'loading' | 'connected' | 'disconnected'
+  const [disconnecting, setDisconnecting] = useState(false)
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    if (params.get("vercel_connected") || params.get("vercel_error")) {
+      window.history.replaceState({}, "", window.location.pathname)
+    }
+
+    fetch("/api/vercel/status")
+      .then(r => r.json())
+      .then(data => setStatus(data.connected ? "connected" : "disconnected"))
+      .catch(() => setStatus("disconnected"))
+  }, [])
+
+  async function handleDisconnect() {
+    setDisconnecting(true)
+    try {
+      await fetch("/api/vercel/connect", { method: "DELETE" })
+      setStatus("disconnected")
+    } finally {
+      setDisconnecting(false)
+    }
+  }
+
+  return (
+    <div style={{ background: T.bg1, border: `1px solid ${status === "connected" ? T.green + "30" : T.border}`, borderRadius: 10, padding: 14, marginBottom: 24 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
+        <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+          <span style={{ fontSize: 18 }}>▲</span>
+          <div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ fontSize: 13, fontWeight: 600, color: T.text0 }}>Vercel</span>
+              {status === "connected" && (
+                <span style={{ ...mono, fontSize: 9, color: T.green, background: `${T.green}15`, border: `1px solid ${T.green}30`, borderRadius: 3, padding: "1px 6px" }}>
+                  ✓ conectado
+                </span>
+              )}
+              {status === "disconnected" && (
+                <span style={{ ...mono, fontSize: 9, color: T.text2, background: T.bg3, border: `1px solid ${T.border}`, borderRadius: 3, padding: "1px 6px" }}>
+                  não conectado
+                </span>
+              )}
+            </div>
+            <div style={{ fontSize: 11, color: T.text2, marginTop: 3 }}>
+              Necessário para usar o botão &ldquo;Publicar&rdquo; num run concluído.
+            </div>
+          </div>
+        </div>
+
+        {status === "connected" ? (
+          <button onClick={handleDisconnect} disabled={disconnecting} style={btnGhost(T.red)}>
+            {disconnecting ? "Desconectando..." : "Desconectar"}
+          </button>
+        ) : status === "disconnected" ? (
+          <a href="/api/vercel/connect" style={{ ...btnSolid(T.violet), textDecoration: "none" }}>
+            Conectar Vercel
+          </a>
+        ) : (
+          <span style={{ ...mono, fontSize: 10, color: T.text2 }}>Verificando...</span>
+        )}
+      </div>
+
+      <div style={{ fontSize: 11, color: T.text2, marginTop: 10, lineHeight: 1.5 }}>
+        Escopo solicitado: criar e atualizar projetos/deployments na sua conta Vercel. O deploy só
+        acontece quando você clicar em &ldquo;Publicar&rdquo; num run concluído — nunca automaticamente,
+        e sempre na sua própria conta (o custo de hospedagem é seu, não do DevFactory).
+      </div>
+    </div>
+  )
+}
+
 export default function ApiKeysSettings({ onBack }) {
   // Em produção: vem de Supabase, tabela user_api_keys, decifrado server-side
   // e nunca exposto em texto puro além da máscara — aqui é estado local mock.
@@ -303,6 +376,11 @@ export default function ApiKeysSettings({ onBack }) {
           Repositório (GitHub)
         </div>
         <GitHubConnectionCard />
+
+        <div style={{ ...mono, fontSize: 10, letterSpacing: 1.5, color: T.text2, textTransform: "uppercase", marginBottom: 10 }}>
+          Deploy (Vercel)
+        </div>
+        <VercelConnectionCard />
 
         <div style={{ ...mono, fontSize: 10, letterSpacing: 1.5, color: T.text2, textTransform: "uppercase", marginBottom: 10 }}>
           Modelos de IA (LLM)
