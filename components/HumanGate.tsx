@@ -57,9 +57,6 @@ function useRunStream(runId: string) {
   const [pendingStage, setPendingStage] = useState<PipelineStage | null>(null)
   const counterRef = useRef(0)
   const sourceRef  = useRef<EventSource | null>(null)
-  const statusRef  = useRef<UIStatus>('idle')
-
-  useEffect(() => { statusRef.current = status }, [status])
 
   useEffect(() => {
     if (!runId) return
@@ -78,7 +75,22 @@ function useRunStream(runId: string) {
       return data
     }
 
-    source.addEventListener('run.snapshot',       e => { const d = addEvent('run.snapshot', e);       setRun(d.payload as ProjectRun) })
+    source.addEventListener('run.snapshot',       e => {
+      const d = addEvent('run.snapshot', e)
+      const snapshot = d.payload as ProjectRun
+      setRun(snapshot)
+      // O snapshot carrega o status real do Postgres — sincronizar aqui
+      // torna a UI robusta a reconexões do SSE: mesmo que um evento
+      // semântico se perca entre streams, o próximo snapshot corrige.
+      if (snapshot.status === 'awaiting_human') {
+        setStatus(snapshot.currentStage === 'quality_council' ? 'quality_review' : 'awaiting_human')
+        if (snapshot.currentStage) setPendingStage(snapshot.currentStage)
+      } else if (snapshot.status === 'running') {
+        setStatus('running')
+      } else if (snapshot.status === 'completed' || snapshot.status === 'failed' || snapshot.status === 'cancelled') {
+        setStatus(snapshot.status)
+      }
+    })
     source.addEventListener('run.started',        e => { addEvent('run.started', e);                  setStatus('running') })
     source.addEventListener('run.completed',      e => { addEvent('run.completed', e);                setStatus('completed'); setRun(prev => prev ? { ...prev, status: 'completed' } : null) })
     source.addEventListener('run.failed',         e => { addEvent('run.failed', e);                   setStatus('failed') })
@@ -102,7 +114,11 @@ function useRunStream(runId: string) {
     })
 
     source.onerror = () => {
-      if (statusRef.current !== 'completed' && statusRef.current !== 'cancelled') setStatus('failed')
+      // O stream SSE fecha por design a cada ~4,5min (maxDuration da função
+      // na Vercel) e o EventSource reconecta sozinho — tratar isso como
+      // falha do run fazia a UI mostrar "Pipeline falhou" com o workflow
+      // saudável, suspenso esperando o gate humano. Falha real chega como
+      // evento `run.failed` vindo do servidor (status do Postgres).
     }
 
     return () => source.close()
