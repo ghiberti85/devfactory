@@ -231,13 +231,14 @@ export class ModelSelector {
     let candidates = this.filterCandidates(ctx)
     let degraded: Tier | null = null
 
-    // "preferFreeTier" é uma preferência, não um requisito — se o tier pedido
-    // só tem candidatos pagos e o usuário não configurou BYOK para nenhum
-    // deles, cair pro tier livre mais alto disponível é melhor do que travar
-    // a etapa inteira (ex: "planning" tem tier default 3, mas o catálogo só
-    // tem modelos free/local até tier 1 — sem isso, todo usuário sem BYOK
-    // ficava permanentemente bloqueado nessa etapa).
-    if (candidates.length === 0 && ctx.preferFreeTier) {
+    // Sem BYOK para o provider exigido pelo tier pedido, simplesmente não
+    // existe alternativa — degradar pro tier livre mais alto disponível é
+    // melhor do que travar a etapa inteira (ex: "planning" tem tier default
+    // 3, mas o catálogo só tem modelos free/local até tier 1). Isso vale
+    // mesmo com preferFreeTier=false: essa flag é só uma preferência de
+    // qualidade quando BYOK existe, não um requisito — sem BYOK a decisão
+    // não é do usuário, é uma limitação real de acesso.
+    if (candidates.length === 0) {
       const resolvedTier = this.resolveTier(ctx)
       for (let t = (resolvedTier - 1) as Tier; t >= 1; t = (t - 1) as Tier) {
         const fallback = this.filterCandidates(ctx, t)
