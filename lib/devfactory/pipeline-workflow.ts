@@ -120,12 +120,14 @@ export async function runDevFactoryPipeline(input: PipelineWorkflowInput): Promi
     run = await runStageWithGate(run, stage)
 
     if (run.status === 'failed' || run.status === 'cancelled') {
+      await persistRunFinishedStep(run.id, run.status)
       return run
     }
   }
 
   run.status = 'completed'
   run.completedAt = new Date().toISOString()
+  await persistRunFinishedStep(run.id, 'completed')
   return run
 }
 
@@ -385,6 +387,18 @@ async function persistStageStartedStep(runId: string, stage: PipelineStage): Pro
     stage,
     status: 'running',
   }, { onConflict: 'run_id,stage', ignoreDuplicates: false })
+}
+
+async function persistRunFinishedStep(runId: string, status: 'completed' | 'failed' | 'cancelled'): Promise<void> {
+  'use step'
+  // Sem isto, o Postgres ficava preso no último estado intermediário
+  // (running/awaiting_human) mesmo com o workflow finalizado — a UI
+  // mostrava "executando pipeline" para sempre em runs já concluídos.
+  const supabase = createSupabaseServiceClient()
+  await supabase.from('pipeline_runs').update({
+    status,
+    completed_at: new Date().toISOString(),
+  }).eq('id', runId)
 }
 
 async function persistStageFailedStep(runId: string, stage: PipelineStage, message: string): Promise<void> {
