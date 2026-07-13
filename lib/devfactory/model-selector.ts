@@ -304,6 +304,20 @@ export class ModelSelector {
       const userHasOwnKey  = ctx.userProviders?.includes(m.provider) ?? false
       if (!isPlatformFree && !userHasOwnKey) return false
 
+      // ── Disponibilidade real da infraestrutura ─────────────────────────────
+      // Não basta o modelo ser elegível no papel — a credencial/endpoint tem
+      // que existir NESTE ambiente, senão o AgentRunner falha com fetch
+      // failed depois de o Selector já ter "escolhido" o modelo.
+      if (m.isLocal) {
+        // Ollama local não existe em serverless — só entra se a URL foi
+        // explicitamente configurada (ex: dev local ou túnel).
+        if (!process.env.OLLAMA_BASE_URL) return false
+      } else if (m.hasFreeTier && !userHasOwnKey) {
+        // Modelo free usa a key de PLATAFORMA — sem a env configurada, a
+        // chamada sairia sem Authorization e falharia de qualquer jeito.
+        if (!process.env[`PLATFORM_${m.provider.toUpperCase()}_FREE_TIER_KEY`]) return false
+      }
+
       // Forçar gratuito
       if (ctx.preferFreeTier && !m.hasFreeTier && !m.isLocal) return false
 
