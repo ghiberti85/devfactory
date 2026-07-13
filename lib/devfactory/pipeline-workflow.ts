@@ -144,9 +144,19 @@ async function runStageWithGate(run: ProjectRun, stage: PipelineStage): Promise<
   while (iteration < run.config.maxIterationsPerStage) {
     iteration++
 
-    const stepResult: StageStepResult = stage === 'quality_council'
-      ? await runQualityCouncilStep(run)
-      : await runSingleStageStep(run, stage, tier, lastIterationRecord?.agentOutput)
+    let stepResult: StageStepResult
+    try {
+      stepResult = stage === 'quality_council'
+        ? await runQualityCouncilStep(run)
+        : await runSingleStageStep(run, stage, tier, lastIterationRecord?.agentOutput)
+    } catch (err) {
+      // FatalError (ex: nenhum modelo disponível) mata o workflow, mas sem
+      // isto o Postgres nunca saberia — a run.status ficava presa em
+      // "running" pra sempre e a UI continuava girando indefinidamente.
+      const message = err instanceof Error ? err.message : 'Erro desconhecido na etapa.'
+      await persistStageFailedStep(run.id, stage, message)
+      throw err
+    }
 
     lastIterationRecord = stepResult.iteration
     run = appendIteration(run, stage, stepResult.iteration)
@@ -215,7 +225,7 @@ async function runSingleStageStep(
   const router = createRouter({
     provider:            (process.env.ROUTER_PROVIDER as RouterProvider | undefined) ?? 'google',
     apiKey:              process.env.PLATFORM_GOOGLE_FREE_TIER_KEY ?? '',
-    modelId:             process.env.ROUTER_MODEL ?? 'gemini-2.5-flash-lite',
+    modelId:             process.env.ROUTER_MODEL ?? 'gemini-flash-lite-latest',
     fallbackToHeuristic: true,
   })
 
@@ -375,6 +385,21 @@ async function persistStageStartedStep(runId: string, stage: PipelineStage): Pro
     stage,
     status: 'running',
   }, { onConflict: 'run_id,stage', ignoreDuplicates: false })
+}
+
+async function persistStageFailedStep(runId: string, stage: PipelineStage, message: string): Promise<void> {
+  'use step'
+  const supabase = createSupabaseServiceClient()
+
+  await supabase.from('pipeline_runs').update({
+    status: 'failed',
+    completed_at: new Date().toISOString(),
+  }).eq('id', runId)
+
+  await supabase.from('stage_outputs').update({
+    status: 'failed',
+    final_output: { error: message },
+  }).eq('run_id', runId).eq('stage', stage)
 }
 
 async function persistIterationStep(

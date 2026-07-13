@@ -228,7 +228,26 @@ export class ModelSelector {
   }
 
   select(ctx: SelectionContext): SelectionResult {
-    const candidates = this.filterCandidates(ctx)
+    let candidates = this.filterCandidates(ctx)
+    let degraded: Tier | null = null
+
+    // "preferFreeTier" é uma preferência, não um requisito — se o tier pedido
+    // só tem candidatos pagos e o usuário não configurou BYOK para nenhum
+    // deles, cair pro tier livre mais alto disponível é melhor do que travar
+    // a etapa inteira (ex: "planning" tem tier default 3, mas o catálogo só
+    // tem modelos free/local até tier 1 — sem isso, todo usuário sem BYOK
+    // ficava permanentemente bloqueado nessa etapa).
+    if (candidates.length === 0 && ctx.preferFreeTier) {
+      const resolvedTier = this.resolveTier(ctx)
+      for (let t = (resolvedTier - 1) as Tier; t >= 1; t = (t - 1) as Tier) {
+        const fallback = this.filterCandidates(ctx, t)
+        if (fallback.length > 0) {
+          candidates = fallback
+          degraded = t
+          break
+        }
+      }
+    }
 
     if (candidates.length === 0) {
       throw new Error(
@@ -246,10 +265,14 @@ export class ModelSelector {
     const best = scored[0]
     const alternatives = scored.slice(1, 4)
 
+    const reason = degraded
+      ? `${this.buildReason(best.model, ctx)} (degradado de tier ${this.resolveTier(ctx)} para tier ${degraded} — sem candidato free/BYOK no tier pedido)`
+      : this.buildReason(best.model, ctx)
+
     return {
       model: best.model,
       score: best.score,
-      reason: this.buildReason(best.model, ctx),
+      reason,
       estimatedCostUsd: this.estimateCost(best.model),
       alternatives: alternatives.map(a => ({ model: a.model, score: a.score })),
     }
@@ -263,8 +286,8 @@ export class ModelSelector {
 
   // ─── Filtragem ──────────────────────────────────────────────────────────────
 
-  private filterCandidates(ctx: SelectionContext): Model[] {
-    const tier = this.resolveTier(ctx)
+  private filterCandidates(ctx: SelectionContext, tierOverride?: Tier): Model[] {
+    const tier = tierOverride ?? this.resolveTier(ctx)
 
     return this.models.filter(m => {
       // Tier mínimo
@@ -546,7 +569,10 @@ export const DEFAULT_MODELS: Model[] = [
   {
     id: 'gemini-2.5-flash', name: 'gemini-2.5-flash',
     displayName: 'Gemini 2.5 Flash', provider: 'google',
-    modelId: 'gemini-2.5-flash', isDefault: true, isActive: true, isLocal: false,
+    // 'gemini-2.5-flash' foi descontinuado para novas contas — usa o alias
+    // rolling da Google que sempre aponta pro Flash atual (evita repetir
+    // esse tipo de quebra a cada geração de modelo).
+    modelId: 'gemini-flash-latest', isDefault: true, isActive: true, isLocal: false,
     tierCapability: 1, contextWindow: 1_000_000,
     strengths: ['analysis', 'multilingual'],
     costInputPer1M: 0.075, costOutputPer1M: 0.30,
@@ -556,7 +582,7 @@ export const DEFAULT_MODELS: Model[] = [
   {
     id: 'gemini-flash-lite', name: 'gemini-flash-lite',
     displayName: 'Gemini Flash-Lite', provider: 'google',
-    modelId: 'gemini-2.5-flash-lite', isDefault: true, isActive: true, isLocal: false,
+    modelId: 'gemini-flash-lite-latest', isDefault: true, isActive: true, isLocal: false,
     tierCapability: 1, contextWindow: 1_000_000,
     strengths: ['analysis'],
     costInputPer1M: 0.01, costOutputPer1M: 0.04,

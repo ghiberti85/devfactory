@@ -143,10 +143,10 @@ interface ProviderConfig {
 }
 
 const PROVIDER_DEFAULTS: Record<RouterProvider, { baseUrl: string; defaultModel: string }> = {
-  google:     { baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai', defaultModel: 'gemini-2.5-flash-lite' },
+  google:     { baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai', defaultModel: 'gemini-flash-lite-latest' },
   glm:        { baseUrl: 'https://open.bigmodel.cn/api/paas/v4',                   defaultModel: 'glm-4.7-flash' },
   groq:       { baseUrl: 'https://api.groq.com/openai/v1',                         defaultModel: 'llama-3.3-70b-versatile' },
-  openrouter: { baseUrl: 'https://openrouter.ai/api/v1',                            defaultModel: 'google/gemini-2.5-flash-lite' },
+  openrouter: { baseUrl: 'https://openrouter.ai/api/v1',                            defaultModel: 'google/gemini-flash-lite-latest' },
   anthropic:  { baseUrl: 'https://api.anthropic.com/v1',                            defaultModel: 'claude-haiku-4-5-20251001' },
 }
 
