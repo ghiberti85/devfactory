@@ -791,9 +791,9 @@ export default function Dashboard({ onNewProject, onSettings } = {}) {
               <span>➕</span> Novo Projeto
             </button>
           )}
-          <div style={{ display: "flex", gap: 2, background: T.bg2, border: `1px solid ${T.border}`, borderRadius: 8, padding: 3, flex: isMobile ? 1 : "none", minWidth: 0 }}>
+          <div style={{ display: "flex", gap: 4, background: T.bg2, border: `1px solid ${T.border}`, borderRadius: 8, padding: 3, flex: isMobile ? 1 : "none", minWidth: 0 }}>
             {[{id:"overview",label:"Overview"},{id:"models",label:"Models"},{id:"learning",label:"Learning"}].map(t => (
-              <button key={t.id} onClick={() => setActiveTab(t.id)} style={{ ...mono, fontSize: 11, padding: "5px 0", borderRadius: 6, border: "none", background: activeTab === t.id ? T.violet : "transparent", color: activeTab === t.id ? "#fff" : T.text2, cursor: "pointer", flex: 1, whiteSpace: "nowrap" }}>
+              <button key={t.id} onClick={() => setActiveTab(t.id)} style={{ ...mono, fontSize: 11, padding: "6px 12px", borderRadius: 6, border: "none", background: activeTab === t.id ? T.violet : "transparent", color: activeTab === t.id ? "#fff" : T.text2, cursor: "pointer", flex: 1, whiteSpace: "nowrap", textAlign: "center" }}>
                 {t.label}
               </button>
             ))}
