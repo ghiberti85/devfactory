@@ -39,6 +39,7 @@ import { createAgentRunner, resolveProviderConfig, type AgentProvider } from './
 import { getUserKeyring } from './run-registry'
 import { runQualityCheckInSandbox, type QualityDimension as SandboxDimension, type GeneratedFile } from './sandbox-runner'
 import { createSupabaseServiceClient } from './supabase'
+import { classifyDeployTarget } from './deploy-target'
 
 // ─── Hook: gate humano ──────────────────────────────────────────────────────
 // Um único hook reutilizável; o token muda por run+etapa+iteração, então
@@ -122,6 +123,16 @@ export async function runDevFactoryPipeline(input: PipelineWorkflowInput): Promi
     if (run.status === 'failed' || run.status === 'cancelled') {
       await persistRunFinishedStep(run.id, run.status)
       return run
+    }
+
+    // Calculado assim que docs_initial aprova — backend/frontend (próximas
+    // etapas) precisam saber disso pra decidir como empacotar o código
+    // (ver buildSystemPrompt). Deterministico, não passa pelo LLM.
+    if (stage === 'docs_initial') {
+      const specText = JSON.stringify(run.stages.docs_initial?.finalOutput ?? '')
+      const classification = classifyDeployTarget(specText)
+      run = { ...run, deployTarget: classification.target, deployTargetReason: classification.reason }
+      await persistDeployTargetStep(run.id, classification.target, classification.reason)
     }
   }
 
@@ -401,6 +412,19 @@ async function persistRunFinishedStep(runId: string, status: 'completed' | 'fail
   }).eq('id', runId)
 }
 
+async function persistDeployTargetStep(
+  runId: string,
+  target: 'vercel-serverless' | 'manual-export',
+  reason: string,
+): Promise<void> {
+  'use step'
+  const supabase = createSupabaseServiceClient()
+  await supabase.from('pipeline_runs').update({
+    deploy_target:        target,
+    deploy_target_reason: reason,
+  }).eq('id', runId)
+}
+
 async function persistStageFailedStep(runId: string, stage: PipelineStage, message: string): Promise<void> {
   'use step'
   const supabase = createSupabaseServiceClient()
@@ -570,6 +594,19 @@ function rejectStage(run: ProjectRun, stage: PipelineStage, decision: HumanGateD
 
 function buildSystemPrompt(stage: PipelineStage, run: ProjectRun): string {
   let prompt = STAGE_SYSTEM_PROMPTS[stage]
+
+  // Restrição de empacotamento pro botão "Publicar" (deploy automático na
+  // Vercel) funcionar: só se aplica quando docs_initial já classificou o
+  // projeto como elegível — não limita o que o produto final faz, só como
+  // o código é organizado (monolito Next.js em vez de servidor separado).
+  if ((stage === 'backend' || stage === 'frontend') && run.deployTarget === 'vercel-serverless') {
+    prompt += `\n\nRESTRIÇÃO DE EMPACOTAMENTO (obrigatória — o resultado será publicado automaticamente
+via Vercel/serverless): gere um único app Next.js (App Router). Backend = API routes em
+"app/api/**/route.ts" — nunca um servidor Express/Fastify separado, nunca "app.listen()".
+Frontend = páginas/componentes do mesmo app Next.js. Se o schema tiver tabelas, assuma Postgres
+(Supabase) e retorne o SQL em "migration" — nunca SQLite em arquivo local (não persiste em serverless).`
+  }
+
   const lastGate = run.stages[stage]?.humanGate
   if (lastGate?.decision === 'rejected' && lastGate.feedback) {
     prompt += `\n\nFEEDBACK DA ITERAÇÃO ANTERIOR (OBRIGATÓRIO INCORPORAR):\n${lastGate.feedback}`

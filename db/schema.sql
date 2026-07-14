@@ -165,6 +165,8 @@ create table pipeline_runs (
   status       text default 'running',
   current_stage text,
   workflow_run_id text, -- runId retornado por start() (Vercel Workflow SDK) — usado por getRun()/cancel()
+  deploy_target        text check (deploy_target in ('vercel-serverless','manual-export')), -- calculado após docs_initial (ver lib/devfactory/deploy-target.ts)
+  deploy_target_reason text,
   started_at   timestamptz default now(),
   completed_at timestamptz,
   total_cost_usd numeric(10,6) default 0,

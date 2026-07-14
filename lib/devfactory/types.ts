@@ -125,6 +125,13 @@ export interface RunConfig {
   projectMode:           ProjectMode
 }
 
+// Elegibilidade pra deploy automático (ver lib/devfactory/deploy-target.ts):
+// 'vercel-serverless' cabe no botão "Publicar" (app Next.js único, sem
+// servidor persistente); 'manual-export' só oferece download do zip —
+// arquitetura pedida no briefing não roda em serverless (ex: WebSocket
+// persistente, worker/daemon em background).
+export type DeployTarget = 'vercel-serverless' | 'manual-export'
+
 export interface ProjectRun {
   id:             string
   userId:         string  // necessário aqui agora — o Workflow não tem "request scope" próprio
@@ -139,6 +146,12 @@ export interface ProjectRun {
   startedAt:      string
   completedAt?:   string
   config:         RunConfig
+
+  // Calculado logo após "docs_initial" aprovar (ver classifyDeployTarget) —
+  // undefined até lá, porque a classificação depende da spec técnica já
+  // gerada (api_contracts/db_schema/tech_stack), não do briefing cru.
+  deployTarget?:  DeployTarget
+  deployTargetReason?: string
 
   githubRepo?:         { owner: string; repo: string; branch?: string }
   repoContextSummary?: string

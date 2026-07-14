@@ -11,7 +11,7 @@
 
 import type {
   ProjectRun, PipelineStage, StageRecord, StageIteration,
-  QualityReport, RunConfig, RunStatus, ProjectMode,
+  QualityReport, RunConfig, RunStatus, ProjectMode, DeployTarget,
 } from './types'
 
 interface DbStageIterationRow {
@@ -49,6 +49,8 @@ export interface DbPipelineRunRow {
   status: string
   current_stage: string | null
   workflow_run_id: string | null
+  deploy_target: string | null
+  deploy_target_reason: string | null
   started_at: string
   completed_at: string | null
   total_cost_usd: number | string | null
@@ -159,6 +161,8 @@ export function mapDbRunToProjectRun(
     startedAt:      run.started_at,
     completedAt:    run.completed_at ?? undefined,
     config,
+    deployTarget:       (run.deploy_target as DeployTarget | null) ?? undefined,
+    deployTargetReason: run.deploy_target_reason ?? undefined,
     githubRepo: project.github_owner && project.github_repo
       ? { owner: project.github_owner, repo: project.github_repo, branch: project.github_branch ?? undefined }
       : undefined,
