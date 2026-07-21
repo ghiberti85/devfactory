@@ -609,6 +609,47 @@ function StageOutputPanel({
   )
 }
 
+function FailedPanel({ run, events }: { run: ProjectRun | null; events: LiveEvent[] }) {
+  // A etapa que falhou tem status 'failed' e finalOutput = { error: string }
+  // (ver persistStageFailedStep em pipeline-workflow.ts) — sem isso exposto
+  // aqui, "Pipeline falhou" na tela não dizia NADA sobre a causa, obrigando
+  // a consultar o Postgres direto pra saber o que aconteceu.
+  const failedEntry = run
+    ? Object.entries(run.stages).find(([, s]) => s?.status === 'failed')
+    : null
+  const failedStage = failedEntry?.[0] as PipelineStage | undefined
+  const failedOutput = failedEntry?.[1]?.finalOutput as { error?: string } | undefined
+  const errorMessage = failedOutput?.error
+
+  // Fallback: se o snapshot ainda não trouxe o finalOutput por algum motivo,
+  // tenta achar a última mensagem de erro que passou pelo log de eventos.
+  const lastErrorEvent = [...events].reverse().find(e => e.type === 'run.failed' || e.type === 'stage.failed')
+  const fallbackMessage = lastErrorEvent
+    ? JSON.stringify(lastErrorEvent.payload).slice(0, 500)
+    : null
+
+  return (
+    <div style={{
+      marginTop: 16, padding: 16, background: '#1a0a0a', border: '1px solid #f8717133',
+      borderRadius: 10, display: 'flex', alignItems: 'flex-start', gap: 12,
+    }}>
+      <span style={{ fontSize: 24 }}>✗</span>
+      <div style={{ flex: 1 }}>
+        <div style={{ color: '#f87171', fontWeight: 600 }}>
+          Pipeline falhou{failedStage ? ` — etapa "${STAGE_META[failedStage].label}"` : ''}
+        </div>
+        <div style={{
+          color: '#e2e8f0', fontSize: 12, fontFamily: 'monospace', marginTop: 8,
+          background: '#0d0d0d', border: '1px solid #2d1414', borderRadius: 6, padding: 10,
+          whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+        }}>
+          {errorMessage ?? fallbackMessage ?? 'Nenhuma mensagem de erro foi persistida para este run — verifique os logs de runtime.'}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function HumanGate({ runId, onComplete }: HumanGateProps) {
@@ -740,6 +781,11 @@ export default function HumanGate({ runId, onComplete }: HumanGateProps) {
         </div>
         <LiveLog events={events} />
       </div>
+
+      {/* Failed */}
+      {status === 'failed' && (
+        <FailedPanel run={run} events={events} />
+      )}
 
       {/* Completed */}
       {status === 'completed' && run && (
