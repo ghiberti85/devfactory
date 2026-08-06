@@ -12,7 +12,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getSessionUser, unauthorizedResponse } from '@/lib/devfactory/auth'
 import { createSupabaseServerClient } from '@/lib/devfactory/supabase'
 import { getUserVercelToken } from '@/lib/devfactory/run-registry'
-import { createVercelProject, triggerDeployment, vercelSlugifyProjectName } from '@/lib/devfactory/vercel-deployer'
+import { createVercelProject, triggerDeployment, vercelSlugifyProjectName, ensureProjectEnvVars } from '@/lib/devfactory/vercel-deployer'
 
 export async function POST(
   req: NextRequest,
@@ -26,7 +26,7 @@ export async function POST(
 
   const { data: run, error } = await supabase
     .from('pipeline_runs')
-    .select('id, user_id, project_id, deploy_target, projects(name, github_owner, github_repo, github_branch)')
+    .select('id, user_id, project_id, deploy_target, stage_outputs(stage, final_output), projects(name, github_owner, github_repo, github_branch)')
     .eq('id', runId)
     .single()
 
@@ -71,9 +71,25 @@ export async function POST(
     branch: project.github_branch ?? 'main',
   }
 
+  const stageOutputs = (run.stage_outputs ?? []) as { stage: string; final_output: unknown }[]
+  const backendOutput = stageOutputs.find(so => so.stage === 'backend')?.final_output as { env_vars?: unknown } | undefined
+  const envVarNames = Array.isArray(backendOutput?.env_vars)
+    ? backendOutput.env_vars.filter((v): v is string => typeof v === 'string')
+    : []
+
   try {
     const projectName = vercelSlugifyProjectName(`${project.name}-${runId.slice(0, 8)}`)
     const vercelProject = await createVercelProject(projectName, gitRepo, accessToken)
+
+    // Sem isso, o build falha em "collect page data" sempre que o código
+    // gerado ler process.env no topo do módulo (ex.: cliente Supabase
+    // instanciado fora de uma função) — placeholders só destravam o build,
+    // não fazem a integração funcionar de verdade (ver comentário em
+    // ensureProjectEnvVars).
+    if (envVarNames.length > 0) {
+      await ensureProjectEnvVars(vercelProject.id, envVarNames, accessToken)
+    }
+
     const deployment = await triggerDeployment(vercelProject.name, gitRepo, accessToken)
 
     const deploymentUrl = `https://${deployment.url}`
@@ -86,6 +102,7 @@ export async function POST(
       deploymentUrl,
       readyState:    deployment.readyState,
       vercelProject: vercelProject.name,
+      placeholderEnvVars: envVarNames,
     })
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Falha ao publicar na Vercel.'

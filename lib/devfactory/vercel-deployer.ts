@@ -87,6 +87,58 @@ export async function createVercelProject(
   }
 }
 
+// ─── Env vars ────────────────────────────────────────────────────────────────
+// A etapa "backend" já declara no próprio output (env_vars[]) quais variáveis
+// o código gerado espera em runtime — mas o projeto Vercel criado aqui não
+// tem nenhuma configurada, e várias dessas variáveis são lidas no TOPO do
+// módulo (ex.: `createClient(process.env.SUPABASE_URL!, ...)` fora de
+// qualquer função), o que o Next.js executa durante "collect page data" no
+// próprio build — sem elas, o build falha (visto em produção: "supabaseUrl
+// is required"), não só o runtime.
+//
+// DevFactory não provisiona um backend de verdade pro app gerado (isso exigiria
+// criar um projeto Supabase novo por run, fora de escopo aqui) — então usa
+// placeholders só pra destravar o build. O usuário troca pelos valores reais
+// nas configurações do projeto na Vercel depois.
+function placeholderEnvValue(key: string): string {
+  const upper = key.toUpperCase()
+  if (upper.includes('SUPABASE_URL')) return 'https://placeholder.supabase.co'
+  if (upper.includes('DATABASE_URL') || upper.includes('POSTGRES')) {
+    return 'postgres://user:password@localhost:5432/placeholder'
+  }
+  if (upper.includes('SUPABASE') && upper.includes('KEY')) {
+    return 'placeholder.eyJhbGciOiJIUzI1NiJ9.placeholder'
+  }
+  if (upper.includes('SECRET') || upper.includes('KEY') || upper.includes('TOKEN')) {
+    return 'placeholder-substitua-pelo-valor-real'
+  }
+  return 'placeholder'
+}
+
+export async function ensureProjectEnvVars(
+  projectIdOrName: string,
+  envVarNames: string[],
+  accessToken: string,
+): Promise<void> {
+  for (const key of envVarNames) {
+    if (!key || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) continue // ignora entradas mal formadas do LLM
+    try {
+      await vercelFetch(`/v10/projects/${encodeURIComponent(projectIdOrName)}/env`, accessToken, {
+        method: 'POST',
+        body: {
+          key,
+          value: placeholderEnvValue(key),
+          type: 'plain',
+          target: ['production', 'preview', 'development'],
+        },
+      })
+    } catch (err) {
+      if (err instanceof VercelApiError && err.status === 409) continue // já existe — não sobrescreve valor real que o usuário possa ter setado
+      throw err
+    }
+  }
+}
+
 export interface DeploymentResult {
   id:         string
   url:        string // <deployment>.vercel.app — disponível assim que o build termina

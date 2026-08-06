@@ -659,6 +659,7 @@ function CompletedPanel({ run, runId }: { run: ProjectRun; runId: string }) {
     run.githubRepo ? `https://github.com/${run.githubRepo.owner}/${run.githubRepo.repo}` : null,
   )
   const [deploymentUrl, setDeploymentUrl] = useState<string | null>(run.vercelDeploymentUrl ?? null)
+  const [placeholderEnvVars, setPlaceholderEnvVars] = useState<string[]>([])
 
   async function handleDownload() {
     setDownloading(true)
@@ -703,6 +704,7 @@ function CompletedPanel({ run, runId }: { run: ProjectRun; runId: string }) {
       const body = await res.json()
       if (!res.ok) throw new Error(body.error ?? 'Falha ao publicar na Vercel.')
       setDeploymentUrl(body.deploymentUrl)
+      setPlaceholderEnvVars(Array.isArray(body.placeholderEnvVars) ? body.placeholderEnvVars : [])
     } catch (err) {
       setPublishError(err instanceof Error ? err.message : 'Falha ao publicar.')
     } finally {
@@ -738,6 +740,15 @@ function CompletedPanel({ run, runId }: { run: ProjectRun; runId: string }) {
         }}>
           <strong style={{ color: '#60a5fa' }}>🚀 Site publicado.</strong> O build pode levar 1-2 minutos
           pra ficar disponível — se a URL abaixo der 404 agora, tenta de novo em instantes.
+          {placeholderEnvVars.length > 0 && (
+            <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid #60a5fa22' }}>
+              <strong style={{ color: '#fbbf24' }}>⚠ Variáveis de ambiente com valor provisório:</strong>{' '}
+              <code style={{ color: '#94a3b8' }}>{placeholderEnvVars.join(', ')}</code>. O código gerado
+              espera essas variáveis (ex.: credenciais de banco de dados) — DevFactory não provisiona esse
+              backend automaticamente, então setou valores de placeholder só pra o build não quebrar.
+              Troque pelos valores reais em Vercel → Project Settings → Environment Variables.
+            </div>
+          )}
         </div>
       ) : notEligible ? (
         <div style={{
