@@ -631,7 +631,11 @@ export const DEFAULT_MODELS: Model[] = [
     tierCapability: 1, contextWindow: 1_000_000,
     strengths: ['coding', 'reasoning'],
     costInputPer1M: 0.14, costOutputPer1M: 0.28,
-    hasFreeTier: true,
+    // NÃO é grátis de verdade — a API da DeepSeek exige saldo pré-pago
+    // mesmo pra este modelo "Flash" (confirmado em produção: 402
+    // "Insufficient Balance" com a conta zerada). Fica disponível só via
+    // BYOK — o usuário paga a própria conta, igual aos demais Tier 2/3.
+    hasFreeTier: false,
     latencyProfile: 'fast', origin: 'chinese', license: 'MIT',
   },
   {
