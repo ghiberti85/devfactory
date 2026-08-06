@@ -111,6 +111,28 @@ async function ghFetch<T>(path: string, token: string): Promise<T> {
   return res.json() as Promise<T>
 }
 
+async function ghWrite<T>(
+  path: string,
+  token: string,
+  method: 'POST' | 'PATCH',
+  body: unknown,
+): Promise<T> {
+  const res = await fetch(`${GITHUB_API}${path}`, {
+    method,
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: 'application/vnd.github+json',
+      'X-GitHub-Api-Version': '2022-11-28',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) {
+    throw new Error(`GitHub API ${method} ${path} → ${res.status}: ${await res.text()}`)
+  }
+  return res.json() as Promise<T>
+}
+
 async function ghFetchRaw(path: string, token: string): Promise<string | null> {
   try {
     const data = await ghFetch<GitHubContentResponse>(path, token)
@@ -316,4 +338,109 @@ export function repoContextToPromptSummary(ctx: RepoContext): string {
   parts.push(`\nÁrvore de arquivos (${ctx.fileTree.length}${ctx.truncated ? '+, truncada' : ''}):\n${ctx.fileTree.slice(0, 150).join('\n')}`)
 
   return parts.join('\n')
+}
+
+// ─── Criação de repositório + commit em massa (Fase 3 — "Publicar") ──────────
+// Usa a Git Data API (blobs → tree → commit → ref) em vez do endpoint de
+// Contents (que só escreve um arquivo por chamada) — necessário pra
+// commitar dezenas de arquivos gerados de uma vez, num commit só.
+
+export interface CreatedRepo {
+  owner:         string
+  repo:          string
+  defaultBranch: string
+  htmlUrl:       string
+}
+
+interface GitHubCreateRepoResponse {
+  name: string
+  owner: { login: string }
+  default_branch: string
+  html_url: string
+}
+
+export async function createRepository(
+  name: string,
+  userGithubToken: string,
+  opts: { private?: boolean; description?: string } = {},
+): Promise<CreatedRepo> {
+  const data = await ghWrite<GitHubCreateRepoResponse>('/user/repos', userGithubToken, 'POST', {
+    name,
+    private: opts.private ?? true,
+    description: opts.description,
+    auto_init: true, // cria o commit inicial (branch/ref já existem pro commitFiles partir daí)
+  })
+  return {
+    owner:         data.owner.login,
+    repo:          data.name,
+    defaultBranch: data.default_branch,
+    htmlUrl:       data.html_url,
+  }
+}
+
+interface GitHubRefResponse { object: { sha: string } }
+interface GitHubCommitResponse { sha: string; tree: { sha: string } }
+interface GitHubBlobResponse { sha: string }
+interface GitHubTreeCreateResponse { sha: string }
+
+export async function commitFiles(
+  ref: GitHubRepoRef,
+  userGithubToken: string,
+  files: { path: string; content: string }[],
+  message: string,
+): Promise<{ commitSha: string; htmlUrl: string }> {
+  const branch = ref.branch ?? 'main'
+
+  const refData = await ghFetch<GitHubRefResponse>(
+    `/repos/${ref.owner}/${ref.repo}/git/ref/heads/${branch}`,
+    userGithubToken,
+  )
+  const baseCommitSha = refData.object.sha
+
+  const baseCommit = await ghFetch<GitHubCommitResponse>(
+    `/repos/${ref.owner}/${ref.repo}/git/commits/${baseCommitSha}`,
+    userGithubToken,
+  )
+
+  // Um blob por arquivo — paralelo, cada um é uma chamada independente.
+  const blobs = await Promise.all(
+    files.map(async file => {
+      const blob = await ghWrite<GitHubBlobResponse>(
+        `/repos/${ref.owner}/${ref.repo}/git/blobs`,
+        userGithubToken,
+        'POST',
+        { content: file.content, encoding: 'utf-8' },
+      )
+      return { path: file.path, sha: blob.sha }
+    }),
+  )
+
+  const newTree = await ghWrite<GitHubTreeCreateResponse>(
+    `/repos/${ref.owner}/${ref.repo}/git/trees`,
+    userGithubToken,
+    'POST',
+    {
+      base_tree: baseCommit.tree.sha,
+      tree: blobs.map(b => ({ path: b.path, mode: '100644', type: 'blob', sha: b.sha })),
+    },
+  )
+
+  const newCommit = await ghWrite<{ sha: string; html_url: string }>(
+    `/repos/${ref.owner}/${ref.repo}/git/commits`,
+    userGithubToken,
+    'POST',
+    { message, tree: newTree.sha, parents: [baseCommitSha] },
+  )
+
+  await ghWrite(
+    `/repos/${ref.owner}/${ref.repo}/git/refs/heads/${branch}`,
+    userGithubToken,
+    'PATCH',
+    { sha: newCommit.sha },
+  )
+
+  return {
+    commitSha: newCommit.sha,
+    htmlUrl:   `https://github.com/${ref.owner}/${ref.repo}/commit/${newCommit.sha}`,
+  }
 }

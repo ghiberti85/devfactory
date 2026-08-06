@@ -653,6 +653,9 @@ function FailedPanel({ run, events }: { run: ProjectRun | null; events: LiveEven
 function CompletedPanel({ run, runId }: { run: ProjectRun; runId: string }) {
   const [downloading, setDownloading] = useState(false)
   const [downloadError, setDownloadError] = useState<string | null>(null)
+  const [publishing, setPublishing] = useState(false)
+  const [publishError, setPublishError] = useState<string | null>(null)
+  const [repoUrl, setRepoUrl] = useState<string | null>(null)
 
   async function handleDownload() {
     setDownloading(true)
@@ -677,6 +680,21 @@ function CompletedPanel({ run, runId }: { run: ProjectRun; runId: string }) {
     }
   }
 
+  async function handlePublishRepo() {
+    setPublishing(true)
+    setPublishError(null)
+    try {
+      const res = await fetch(`/api/runs/${runId}/publish-repo`, { method: 'POST' })
+      const body = await res.json()
+      if (!res.ok) throw new Error(body.error ?? 'Falha ao criar o repositório.')
+      setRepoUrl(body.repoUrl)
+    } catch (err) {
+      setPublishError(err instanceof Error ? err.message : 'Falha ao criar o repositório.')
+    } finally {
+      setPublishing(false)
+    }
+  }
+
   const isFreeCost = run.totalCostUsd < 0.000001
 
   return (
@@ -696,25 +714,34 @@ function CompletedPanel({ run, runId }: { run: ProjectRun; runId: string }) {
         </div>
       </div>
 
-      {/* Aviso honesto: nada foi publicado — só os arquivos existem, salvos
-          no banco. Deploy automático (repositório GitHub + Vercel) ainda
-          não existe nesta versão. */}
+      {/* Aviso honesto: nada foi publicado NA WEB ainda — deploy automático
+          (Vercel) não existe nesta versão. Criar o repositório já é
+          possível (Fase 3); o próximo passo (Fase 4) é linkar esse
+          repositório a um deploy automático. */}
       <div style={{
         background: '#111', border: '1px solid #2d2d2d', borderRadius: 8, padding: 12,
         fontSize: 12, color: '#94a3b8', lineHeight: 1.6,
       }}>
-        <strong style={{ color: '#e2e8f0' }}>Nenhum site foi publicado.</strong> O DevFactory ainda não faz
-        deploy automático — o que existe agora são os arquivos de código gerados (backend + frontend),
-        guardados neste run. Baixe o zip abaixo, rode <code>npm install</code> e depois <code>npm run dev</code>{' '}
-        localmente pra ver o resultado. Deploy automático (GitHub + Vercel com um clique) está em
-        desenvolvimento.
+        <strong style={{ color: '#e2e8f0' }}>Nenhum site foi publicado ainda.</strong> O deploy automático
+        (um clique → site no ar) está em desenvolvimento. Por agora você pode: baixar os arquivos gerados,
+        ou criar um repositório na sua conta do GitHub com o código — o primeiro passo pra publicar depois.
       </div>
 
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
         <button onClick={handleDownload} disabled={downloading} style={btnStyle('#34d399')}>
           {downloading ? 'Gerando .zip...' : '⬇ Baixar projeto (.zip)'}
         </button>
+        {!repoUrl ? (
+          <button onClick={handlePublishRepo} disabled={publishing} style={btnStyle('#60a5fa')}>
+            {publishing ? 'Criando repositório...' : '⚫ Criar repositório no GitHub'}
+          </button>
+        ) : (
+          <a href={repoUrl} target="_blank" rel="noopener noreferrer" style={{ ...btnStyle('#60a5fa'), textDecoration: 'none', display: 'inline-block' }}>
+            ✓ Ver repositório no GitHub ↗
+          </a>
+        )}
         {downloadError && <span style={{ color: '#f87171', fontSize: 11 }}>{downloadError}</span>}
+        {publishError && <span style={{ color: '#f87171', fontSize: 11 }}>{publishError}</span>}
       </div>
     </div>
   )
