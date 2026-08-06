@@ -10,6 +10,13 @@
 
 const VERCEL_API = 'https://api.vercel.com'
 
+export class VercelApiError extends Error {
+  constructor(public status: number, message: string) {
+    super(message)
+    this.name = 'VercelApiError'
+  }
+}
+
 async function vercelFetch<T>(
   path: string,
   accessToken: string,
@@ -25,7 +32,10 @@ async function vercelFetch<T>(
   })
   if (!res.ok) {
     const body = await res.text()
-    throw new Error(`Vercel API ${init.method ?? 'GET'} ${path} → ${res.status}: ${body}`)
+    throw new VercelApiError(
+      res.status,
+      `Vercel API ${init.method ?? 'GET'} ${path} → ${res.status}: ${body}`,
+    )
   }
   return res.json() as Promise<T>
 }
@@ -56,15 +66,25 @@ export async function createVercelProject(
   gitRepo: { owner: string; repo: string },
   accessToken: string,
 ): Promise<VercelProjectRef> {
-  const data = await vercelFetch<VercelCreateProjectResponse>('/v11/projects', accessToken, {
-    method: 'POST',
-    body: {
-      name,
-      framework: 'nextjs',
-      gitRepository: { repo: `${gitRepo.owner}/${gitRepo.repo}`, type: 'github' },
-    },
-  })
-  return { id: data.id, name: data.name }
+  try {
+    const data = await vercelFetch<VercelCreateProjectResponse>('/v11/projects', accessToken, {
+      method: 'POST',
+      body: {
+        name,
+        framework: 'nextjs',
+        gitRepository: { repo: `${gitRepo.owner}/${gitRepo.repo}`, type: 'github' },
+      },
+    })
+    return { id: data.id, name: data.name }
+  } catch (err) {
+    if (!(err instanceof VercelApiError) || err.status !== 409) throw err
+    // Nome já usado por um projeto existente (ex.: teste anterior) — reaproveita em vez de falhar.
+    const existing = await vercelFetch<VercelCreateProjectResponse>(
+      `/v9/projects/${encodeURIComponent(name)}`,
+      accessToken,
+    )
+    return { id: existing.id, name: existing.name }
+  }
 }
 
 export interface DeploymentResult {
