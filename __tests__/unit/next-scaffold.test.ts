@@ -35,6 +35,15 @@ describe('ensureNextScaffold', () => {
     expect(result.some(f => f.path === 'app/globals.css')).toBe(true)
   })
 
+  it('does not treat the "@/" tsconfig path alias as an npm package', () => {
+    const result = ensureNextScaffold([
+      { path: 'app/page.tsx', content: `import { supabase } from '@/lib/supabase'\nexport default function Page() { return null }` },
+    ])
+    const pkg = JSON.parse(result.find(f => f.path === 'package.json')!.content)
+    expect(pkg.dependencies['@/lib']).toBeUndefined()
+    expect(pkg.dependencies['@/lib/supabase']).toBeUndefined()
+  })
+
   it('never overwrites an AI-provided package.json field it did not need to touch', () => {
     const result = ensureNextScaffold([
       { path: 'package.json', content: JSON.stringify({ name: 'my-custom-app', dependencies: { next: '15.1.0' } }) },

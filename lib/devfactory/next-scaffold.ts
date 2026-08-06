@@ -135,6 +135,7 @@ function extractBareImports(content: string): string[] {
   while ((match = IMPORT_RE.exec(content))) {
     const spec = match[1] ?? match[2] ?? match[3]
     if (!spec || spec.startsWith('.') || spec.startsWith('/')) continue
+    if (spec.startsWith('@/')) continue // alias local (tsconfig "paths"), não é pacote npm
     if (spec === 'react' || spec === 'react-dom' || spec.startsWith('next')) continue
     if (NODE_BUILTINS.has(spec) || spec.startsWith('node:')) continue
     const pkgName = spec.startsWith('@') ? spec.split('/').slice(0, 2).join('/') : spec.split('/')[0]
