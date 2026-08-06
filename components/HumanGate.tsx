@@ -767,9 +767,14 @@ function CompletedPanel({ run, runId }: { run: ProjectRun; runId: string }) {
 
         {!notEligible && (
           deploymentUrl ? (
-            <a href={deploymentUrl} target="_blank" rel="noopener noreferrer" style={{ ...btnStyle('#60a5fa'), textDecoration: 'none', display: 'inline-block' }}>
-              ✓ Abrir site ↗
-            </a>
+            <>
+              <a href={deploymentUrl} target="_blank" rel="noopener noreferrer" style={{ ...btnStyle('#60a5fa'), textDecoration: 'none', display: 'inline-block' }}>
+                ✓ Abrir site ↗
+              </a>
+              <button onClick={handlePublish} disabled={publishing} style={btnStyle('#94a3b8')}>
+                {publishStep === 'repo' ? 'Atualizando repositório...' : publishStep === 'deploy' ? 'Republicando...' : '↻ Republicar'}
+              </button>
+            </>
           ) : (
             <button onClick={handlePublish} disabled={publishing} style={btnStyle('#60a5fa')}>
               {publishStep === 'repo' ? 'Criando repositório...' : publishStep === 'deploy' ? 'Publicando...' : '🚀 Publicar'}
