@@ -97,8 +97,16 @@ export async function POST(
 
   try {
     // Opção B (Fase 2): o repo já existe e já recebeu commit a cada etapa
-    // aprovada — não cria outro, só devolve a URL existente.
+    // aprovada — não cria outro. Ainda assim reforça o scaffold: repos
+    // criados antes desta correção (ou cujo commit por etapa falhou
+    // silenciosamente) podem não ter package.json/next.config na raiz.
     if (project?.github_owner && project.github_repo) {
+      await commitFiles(
+        { owner: project.github_owner, repo: project.github_repo, branch: project.github_branch ?? 'main' },
+        token,
+        allFiles,
+        'DevFactory: garante arquivos de raiz do Next.js (package.json, next.config, tsconfig)',
+      )
       return NextResponse.json({
         ok:            true,
         repoUrl:       `https://github.com/${project.github_owner}/${project.github_repo}`,
