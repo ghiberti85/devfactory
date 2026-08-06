@@ -152,6 +152,7 @@ export interface ProjectRun {
   // gerada (api_contracts/db_schema/tech_stack), não do briefing cru.
   deployTarget?:  DeployTarget
   deployTargetReason?: string
+  vercelDeploymentUrl?: string
 
   githubRepo?:         { owner: string; repo: string; branch?: string }
   repoContextSummary?: string

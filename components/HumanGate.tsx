@@ -653,9 +653,12 @@ function FailedPanel({ run, events }: { run: ProjectRun | null; events: LiveEven
 function CompletedPanel({ run, runId }: { run: ProjectRun; runId: string }) {
   const [downloading, setDownloading] = useState(false)
   const [downloadError, setDownloadError] = useState<string | null>(null)
-  const [publishing, setPublishing] = useState(false)
+  const [publishStep, setPublishStep] = useState<'idle' | 'repo' | 'deploy'>('idle')
   const [publishError, setPublishError] = useState<string | null>(null)
-  const [repoUrl, setRepoUrl] = useState<string | null>(null)
+  const [repoUrl, setRepoUrl] = useState<string | null>(
+    run.githubRepo ? `https://github.com/${run.githubRepo.owner}/${run.githubRepo.repo}` : null,
+  )
+  const [deploymentUrl, setDeploymentUrl] = useState<string | null>(run.vercelDeploymentUrl ?? null)
 
   async function handleDownload() {
     setDownloading(true)
@@ -680,22 +683,37 @@ function CompletedPanel({ run, runId }: { run: ProjectRun; runId: string }) {
     }
   }
 
-  async function handlePublishRepo() {
-    setPublishing(true)
+  // Fluxo combinado: cria o repositório (se ainda não existir) e na
+  // sequência linka+dispara o deploy na Vercel — um clique só, do jeito
+  // que o botão "Publicar" deveria funcionar.
+  async function handlePublish() {
     setPublishError(null)
     try {
-      const res = await fetch(`/api/runs/${runId}/publish-repo`, { method: 'POST' })
+      let currentRepoUrl = repoUrl
+      if (!currentRepoUrl) {
+        setPublishStep('repo')
+        const res = await fetch(`/api/runs/${runId}/publish-repo`, { method: 'POST' })
+        const body = await res.json()
+        if (!res.ok) throw new Error(body.error ?? 'Falha ao criar o repositório.')
+        currentRepoUrl = body.repoUrl
+        setRepoUrl(body.repoUrl)
+      }
+
+      setPublishStep('deploy')
+      const res = await fetch(`/api/runs/${runId}/publish-vercel`, { method: 'POST' })
       const body = await res.json()
-      if (!res.ok) throw new Error(body.error ?? 'Falha ao criar o repositório.')
-      setRepoUrl(body.repoUrl)
+      if (!res.ok) throw new Error(body.error ?? 'Falha ao publicar na Vercel.')
+      setDeploymentUrl(body.deploymentUrl)
     } catch (err) {
-      setPublishError(err instanceof Error ? err.message : 'Falha ao criar o repositório.')
+      setPublishError(err instanceof Error ? err.message : 'Falha ao publicar.')
     } finally {
-      setPublishing(false)
+      setPublishStep('idle')
     }
   }
 
   const isFreeCost = run.totalCostUsd < 0.000001
+  const notEligible = run.deployTarget === 'manual-export'
+  const publishing = publishStep !== 'idle'
 
   return (
     <div style={{
@@ -714,32 +732,57 @@ function CompletedPanel({ run, runId }: { run: ProjectRun; runId: string }) {
         </div>
       </div>
 
-      {/* Aviso honesto: nada foi publicado NA WEB ainda — deploy automático
-          (Vercel) não existe nesta versão. Criar o repositório já é
-          possível (Fase 3); o próximo passo (Fase 4) é linkar esse
-          repositório a um deploy automático. */}
-      <div style={{
-        background: '#111', border: '1px solid #2d2d2d', borderRadius: 8, padding: 12,
-        fontSize: 12, color: '#94a3b8', lineHeight: 1.6,
-      }}>
-        <strong style={{ color: '#e2e8f0' }}>Nenhum site foi publicado ainda.</strong> O deploy automático
-        (um clique → site no ar) está em desenvolvimento. Por agora você pode: baixar os arquivos gerados,
-        ou criar um repositório na sua conta do GitHub com o código — o primeiro passo pra publicar depois.
-      </div>
+      {deploymentUrl ? (
+        <div style={{
+          background: '#0a1a2e', border: '1px solid #60a5fa33', borderRadius: 8, padding: 12,
+          fontSize: 12, color: '#e2e8f0', lineHeight: 1.6,
+        }}>
+          <strong style={{ color: '#60a5fa' }}>🚀 Site publicado.</strong> O build pode levar 1-2 minutos
+          pra ficar disponível — se a URL abaixo der 404 agora, tenta de novo em instantes.
+        </div>
+      ) : notEligible ? (
+        <div style={{
+          background: '#1a140a', border: '1px solid #fbbf2433', borderRadius: 8, padding: 12,
+          fontSize: 12, color: '#94a3b8', lineHeight: 1.6,
+        }}>
+          <strong style={{ color: '#fbbf24' }}>Este projeto não é elegível para deploy automático.</strong>{' '}
+          {run.deployTargetReason ?? 'A arquitetura pedida no briefing precisa de um ambiente que a Vercel serverless não hospeda.'}{' '}
+          Baixe os arquivos e publique manualmente num ambiente compatível.
+        </div>
+      ) : (
+        <div style={{
+          background: '#111', border: '1px solid #2d2d2d', borderRadius: 8, padding: 12,
+          fontSize: 12, color: '#94a3b8', lineHeight: 1.6,
+        }}>
+          Ainda não publicado. O botão <strong style={{ color: '#e2e8f0' }}>Publicar</strong> cria um
+          repositório na sua conta do GitHub e faz o deploy na sua conta da Vercel — as duas precisam
+          estar conectadas em <code>/settings/api-keys</code>.
+        </div>
+      )}
 
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
         <button onClick={handleDownload} disabled={downloading} style={btnStyle('#34d399')}>
           {downloading ? 'Gerando .zip...' : '⬇ Baixar projeto (.zip)'}
         </button>
-        {!repoUrl ? (
-          <button onClick={handlePublishRepo} disabled={publishing} style={btnStyle('#60a5fa')}>
-            {publishing ? 'Criando repositório...' : '⚫ Criar repositório no GitHub'}
-          </button>
-        ) : (
-          <a href={repoUrl} target="_blank" rel="noopener noreferrer" style={{ ...btnStyle('#60a5fa'), textDecoration: 'none', display: 'inline-block' }}>
-            ✓ Ver repositório no GitHub ↗
+
+        {!notEligible && (
+          deploymentUrl ? (
+            <a href={deploymentUrl} target="_blank" rel="noopener noreferrer" style={{ ...btnStyle('#60a5fa'), textDecoration: 'none', display: 'inline-block' }}>
+              ✓ Abrir site ↗
+            </a>
+          ) : (
+            <button onClick={handlePublish} disabled={publishing} style={btnStyle('#60a5fa')}>
+              {publishStep === 'repo' ? 'Criando repositório...' : publishStep === 'deploy' ? 'Publicando...' : '🚀 Publicar'}
+            </button>
+          )
+        )}
+
+        {repoUrl && (
+          <a href={repoUrl} target="_blank" rel="noopener noreferrer" style={{ color: '#555', fontSize: 11, textDecoration: 'underline' }}>
+            ver repositório
           </a>
         )}
+
         {downloadError && <span style={{ color: '#f87171', fontSize: 11 }}>{downloadError}</span>}
         {publishError && <span style={{ color: '#f87171', fontSize: 11 }}>{publishError}</span>}
       </div>

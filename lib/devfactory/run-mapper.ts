@@ -51,6 +51,7 @@ export interface DbPipelineRunRow {
   workflow_run_id: string | null
   deploy_target: string | null
   deploy_target_reason: string | null
+  vercel_deployment_url: string | null
   started_at: string
   completed_at: string | null
   total_cost_usd: number | string | null
@@ -163,6 +164,7 @@ export function mapDbRunToProjectRun(
     config,
     deployTarget:       (run.deploy_target as DeployTarget | null) ?? undefined,
     deployTargetReason: run.deploy_target_reason ?? undefined,
+    vercelDeploymentUrl: run.vercel_deployment_url ?? undefined,
     githubRepo: project.github_owner && project.github_repo
       ? { owner: project.github_owner, repo: project.github_repo, branch: project.github_branch ?? undefined }
       : undefined,
