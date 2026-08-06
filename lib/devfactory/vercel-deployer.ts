@@ -115,13 +115,25 @@ function placeholderEnvValue(key: string): string {
   return 'placeholder'
 }
 
+// A etapa "backend" às vezes retorna "NOME=descrição/exemplo" em vez do nome
+// puro (ex.: "NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co") —
+// o formato exato do JSON não é validado contra um schema rígido, só o
+// prompt pede "env_vars[]". Extrai só o identificador antes do "=".
+function normalizeEnvVarKey(raw: string): string | null {
+  const key = raw.split('=')[0]?.trim()
+  if (!key || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) return null
+  return key
+}
+
 export async function ensureProjectEnvVars(
   projectIdOrName: string,
   envVarNames: string[],
   accessToken: string,
-): Promise<void> {
-  for (const key of envVarNames) {
-    if (!key || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) continue // ignora entradas mal formadas do LLM
+): Promise<string[]> {
+  const applied: string[] = []
+  for (const raw of envVarNames) {
+    const key = normalizeEnvVarKey(raw)
+    if (!key) continue // ignora entradas mal formadas do LLM que nem um identificador válido têm
     try {
       await vercelFetch(`/v10/projects/${encodeURIComponent(projectIdOrName)}/env`, accessToken, {
         method: 'POST',
@@ -132,11 +144,13 @@ export async function ensureProjectEnvVars(
           target: ['production', 'preview', 'development'],
         },
       })
+      applied.push(key)
     } catch (err) {
-      if (err instanceof VercelApiError && err.status === 409) continue // já existe — não sobrescreve valor real que o usuário possa ter setado
+      if (err instanceof VercelApiError && err.status === 409) { applied.push(key); continue } // já existe — não sobrescreve valor real que o usuário possa ter setado
       throw err
     }
   }
+  return applied
 }
 
 export interface DeploymentResult {

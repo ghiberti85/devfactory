@@ -85,10 +85,13 @@ export async function POST(
     // gerado ler process.env no topo do módulo (ex.: cliente Supabase
     // instanciado fora de uma função) — placeholders só destravam o build,
     // não fazem a integração funcionar de verdade (ver comentário em
-    // ensureProjectEnvVars).
-    if (envVarNames.length > 0) {
-      await ensureProjectEnvVars(vercelProject.id, envVarNames, accessToken)
-    }
+    // ensureProjectEnvVars). ensureProjectEnvVars devolve só as chaves que
+    // conseguiu de fato aplicar (normaliza "NOME=exemplo" pro nome puro,
+    // descarta o que nem isso for) — reportar envVarNames cru pro usuário
+    // fica enganoso se algumas entradas não viraram env var nenhuma.
+    const appliedEnvVars = envVarNames.length > 0
+      ? await ensureProjectEnvVars(vercelProject.id, envVarNames, accessToken)
+      : []
 
     const deployment = await triggerDeployment(vercelProject.name, gitRepo, accessToken)
 
@@ -102,7 +105,7 @@ export async function POST(
       deploymentUrl,
       readyState:    deployment.readyState,
       vercelProject: vercelProject.name,
-      placeholderEnvVars: envVarNames,
+      placeholderEnvVars: appliedEnvVars,
     })
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Falha ao publicar na Vercel.'
