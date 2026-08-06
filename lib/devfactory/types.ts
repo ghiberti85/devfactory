@@ -123,6 +123,11 @@ export interface RunConfig {
   excludeOrigins?:       string[]
   budgetUsd?:            number
   projectMode:           ProjectMode
+
+  // Opção A (default) | B — ver NewProjectForm. B cria o repositório no
+  // início do run e commita cada etapa aprovada; A só cria/publica quando
+  // o usuário clicar "Publicar" no run concluído (Fase 3/4).
+  connectGithubEarly?:    boolean
 }
 
 // Elegibilidade pra deploy automático (ver lib/devfactory/deploy-target.ts):
@@ -154,8 +159,12 @@ export interface ProjectRun {
   deployTargetReason?: string
   vercelDeploymentUrl?: string
 
-  githubRepo?:         { owner: string; repo: string; branch?: string }
+  githubRepo?:         { owner: string; repo: string; branch?: string } // modo brownfield — só LEITURA de contexto, nunca recebe commit
   repoContextSummary?: string
+
+  // Repo criado pelo DevFactory pra receber os commits da Fase 2 "opção B"
+  // — nunca é o mesmo repo de githubRepo (contexto brownfield).
+  publishRepo?: { owner: string; repo: string; branch: string }
 
   // BYOK — resolvido UMA VEZ ao iniciar o run e congelado no input do
   // workflow. Workflows são deterministicamente re-executados (replay) em
@@ -183,6 +192,7 @@ export function createProjectRun(params: {
   config?:      Partial<RunConfig>
   githubRepo?:  { owner: string; repo: string; branch?: string }
   repoContextSummary?: string
+  publishRepo?: { owner: string; repo: string; branch: string }
   userProviders: string[]
 }): ProjectRun {
   return {
@@ -199,6 +209,7 @@ export function createProjectRun(params: {
     startedAt:      new Date().toISOString(),
     githubRepo:         params.githubRepo,
     repoContextSummary: params.repoContextSummary,
+    publishRepo:        params.publishRepo,
     userProviders:      params.userProviders,
     config: {
       maxIterationsPerStage: params.config?.maxIterationsPerStage ?? 3,
@@ -208,6 +219,7 @@ export function createProjectRun(params: {
       excludeOrigins:        params.config?.excludeOrigins,
       budgetUsd:             params.config?.budgetUsd,
       projectMode:           params.githubRepo ? 'brownfield' : (params.config?.projectMode ?? 'greenfield'),
+      connectGithubEarly:    params.config?.connectGithubEarly ?? false,
     },
   }
 }

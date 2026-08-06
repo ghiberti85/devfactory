@@ -345,6 +345,16 @@ export function repoContextToPromptSummary(ctx: RepoContext): string {
 // Contents (que só escreve um arquivo por chamada) — necessário pra
 // commitar dezenas de arquivos gerados de uma vez, num commit só.
 
+// GitHub só aceita [A-Za-z0-9._-] no nome do repo.
+export function slugifyRepoName(name: string): string {
+  const slug = name
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '') // remove acentos
+    .replace(/[^a-zA-Z0-9._-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .toLowerCase()
+  return slug || 'devfactory-project'
+}
+
 export interface CreatedRepo {
   owner:         string
   repo:          string

@@ -238,6 +238,11 @@ export default function NewProjectForm({ onSubmit, onCancel }) {
   const [budgetUsd,      setBudgetUsd]      = useState("")
   const [showAdvanced,   setShowAdvanced]   = useState(false)
 
+  // Quando conectar o GitHub — só se aplica a projeto novo (greenfield);
+  // "Repositório existente" já é outra conexão, com outro propósito
+  // (contexto de leitura, não alvo de commit).
+  const [connectGithubEarly, setConnectGithubEarly] = useState(false)
+
   const charCount   = briefing.length
   const wordCount   = briefing.trim() ? briefing.trim().split(/\s+/).length : 0
 
@@ -293,6 +298,7 @@ export default function NewProjectForm({ onSubmit, onCancel }) {
         preferFreeTier,
         maxIterationsPerStage: maxIterations,
         budgetUsd: budgetUsd ? parseFloat(budgetUsd) : undefined,
+        connectGithubEarly: projectSource === "new" ? connectGithubEarly : false,
       },
     })
   }
@@ -436,6 +442,57 @@ export default function NewProjectForm({ onSubmit, onCancel }) {
                 )}
               </div>
             )}
+          </div>
+        )}
+
+        {/* ── Quando conectar o GitHub (opção A vs B) — só projeto novo ── */}
+        {projectSource === "new" && (
+          <div style={{ marginBottom: 20 }}>
+            <FieldLabel hint="Isso não afeta o que a IA vai gerar — só quando o repositório é criado na sua conta.">
+              Quando conectar ao GitHub?
+            </FieldLabel>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <button
+                onClick={() => setConnectGithubEarly(false)}
+                style={{
+                  textAlign: "left", padding: 12, borderRadius: 8, cursor: "pointer",
+                  border: `1px solid ${!connectGithubEarly ? T.violet : T.border}`,
+                  background: !connectGithubEarly ? `${T.violet}10` : T.bg1,
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
+                  <span style={{ fontSize: 12, fontWeight: 600, color: !connectGithubEarly ? T.violet : T.text0 }}>
+                    Só no final, ao publicar
+                  </span>
+                  {!connectGithubEarly && <span style={{ ...mono, fontSize: 9, color: T.violet }}>PADRÃO</span>}
+                </div>
+                <div style={{ fontSize: 11, color: T.text2, lineHeight: 1.5 }}>
+                  Simples e sem compromisso: nada é criado no seu GitHub até você clicar em
+                  &ldquo;Publicar&rdquo; no final, já com o código pronto revisado. Se desistir no meio do
+                  caminho, nenhum repositório fica pra trás.
+                </div>
+              </button>
+
+              <button
+                onClick={() => setConnectGithubEarly(true)}
+                style={{
+                  textAlign: "left", padding: 12, borderRadius: 8, cursor: "pointer",
+                  border: `1px solid ${connectGithubEarly ? T.violet : T.border}`,
+                  background: connectGithubEarly ? `${T.violet}10` : T.bg1,
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
+                  <span style={{ fontSize: 12, fontWeight: 600, color: connectGithubEarly ? T.violet : T.text0 }}>
+                    Desde já, com histórico de commits
+                  </span>
+                </div>
+                <div style={{ fontSize: 11, color: T.text2, lineHeight: 1.5 }}>
+                  Cria o repositório assim que a pipeline começa e commita cada etapa aprovada (PRD,
+                  spec, design, código) — o git log conta a história inteira da geração. Em troca, um
+                  repositório é criado na sua conta mesmo que você não termine o run.
+                </div>
+              </button>
+            </div>
           </div>
         )}
 

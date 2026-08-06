@@ -13,7 +13,7 @@ import { start } from 'workflow/api'
 
 import { runDevFactoryPipeline } from '@/lib/devfactory/pipeline-workflow'
 import { createProjectRun, type RunConfig } from '@/lib/devfactory/types'
-import { fetchRepoContext, repoContextToPromptSummary, type GitHubRepoRef } from '@/lib/devfactory/github-connector'
+import { fetchRepoContext, repoContextToPromptSummary, createRepository, slugifyRepoName, type GitHubRepoRef } from '@/lib/devfactory/github-connector'
 import { getUserGithubToken, getUserKeyring } from '@/lib/devfactory/run-registry'
 import { getSessionUser, unauthorizedResponse } from '@/lib/devfactory/auth'
 import { createSupabaseServerClient } from '@/lib/devfactory/supabase'
@@ -64,6 +64,32 @@ export async function POST(req: NextRequest) {
   // segredos fiquem persistidos no event log durável do workflow.
   const { userProviders } = await getUserKeyring(user.id)
 
+  // Opção B (Fase 2): cria o repositório AGORA, antes do workflow começar,
+  // pra pipeline-workflow.ts poder commitar cada etapa aprovada nele. Só se
+  // aplica a greenfield — brownfield já usa um repo existente pra contexto
+  // (githubRepo), commitar ali sem permissão explícita seria perigoso.
+  let publishRepo: { owner: string; repo: string; branch: string } | undefined
+  if (body.config?.connectGithubEarly && !body.githubRepo) {
+    const githubToken = await getUserGithubToken(user.id)
+    if (!githubToken) {
+      return NextResponse.json(
+        { error: 'Conecte sua conta do GitHub em /settings/api-keys antes de escolher "conectar desde já".' },
+        { status: 400 },
+      )
+    }
+    try {
+      const repoName = `${slugifyRepoName(body.projectName)}-${crypto.randomUUID().slice(0, 8)}`
+      const created = await createRepository(repoName, githubToken, {
+        private: true,
+        description: `Gerado pelo DevFactory — ${body.projectName}`,
+      })
+      publishRepo = { owner: created.owner, repo: created.repo, branch: created.defaultBranch }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Falha ao criar o repositório no GitHub.'
+      return NextResponse.json({ error: message }, { status: 502 })
+    }
+  }
+
   const run = createProjectRun({
     id:           crypto.randomUUID(),
     userId:       user.id,
@@ -73,13 +99,23 @@ export async function POST(req: NextRequest) {
     config:       body.config,
     githubRepo:   body.githubRepo,
     repoContextSummary,
+    publishRepo,
     userProviders,
   })
+
+  const supabase = createSupabaseServerClient(req)
+
+  if (publishRepo) {
+    await supabase.from('projects').update({
+      github_owner:  publishRepo.owner,
+      github_repo:   publishRepo.repo,
+      github_branch: publishRepo.branch,
+    }).eq('id', body.projectId)
+  }
 
   // Cria a linha de pipeline_runs ANTES de start() — os steps de persistência
   // do workflow (pipeline-workflow.ts) fazem UPDATE por id a partir daqui, e
   // o dashboard/stream precisam encontrar a linha desde o primeiro poll.
-  const supabase = createSupabaseServerClient(req)
   const { error: insertError } = await supabase.from('pipeline_runs').insert({
     id:            run.id,
     project_id:    run.projectId,

@@ -120,7 +120,12 @@ create table projects (
   budget_usd    numeric(10,4),
   max_iterations_per_stage int default 3,
 
-  -- modo brownfield: repositório existente conectado
+  -- Guarda o repositório do projeto — dois usos mutuamente exclusivos por
+  -- construção (nunca os dois ao mesmo tempo num mesmo projeto):
+  --   brownfield:            repo EXISTENTE conectado só pra contexto (leitura)
+  --   greenfield + opção B:  repo CRIADO pelo DevFactory pra receber commits
+  -- Ver ProjectRun.githubRepo vs ProjectRun.publishRepo em types.ts — o
+  -- workflow nunca confunde os dois em memória; aqui é só persistência/UI.
   project_mode    text default 'greenfield' check (project_mode in ('greenfield','brownfield')),
   github_owner    text,
   github_repo     text,

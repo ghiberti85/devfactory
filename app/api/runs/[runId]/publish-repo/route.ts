@@ -5,6 +5,10 @@
  * usuário (com o token dele, nunca o do DevFactory) e commita os arquivos
  * gerados (backend + frontend) num commit só, via Git Data API.
  *
+ * Se o run já tem um repositório (opção B da Fase 2 — conectado desde o
+ * início, ver pipeline-workflow.ts persistStageCommitStep), não cria outro
+ * — só garante que backend/frontend estão commitados nele e devolve a URL.
+ *
  * Ainda não faz deploy (Fase 4) — só devolve a URL do repositório criado.
  */
 
@@ -12,7 +16,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getSessionUser, unauthorizedResponse } from '@/lib/devfactory/auth'
 import { createSupabaseServerClient } from '@/lib/devfactory/supabase'
 import { getUserGithubToken } from '@/lib/devfactory/run-registry'
-import { createRepository, commitFiles } from '@/lib/devfactory/github-connector'
+import { createRepository, commitFiles, slugifyRepoName } from '@/lib/devfactory/github-connector'
 
 interface GeneratedFile {
   path:    string
@@ -28,16 +32,6 @@ function extractFiles(finalOutput: unknown): GeneratedFile[] {
   )
 }
 
-// GitHub só aceita [A-Za-z0-9._-] no nome do repo.
-function slugifyRepoName(name: string): string {
-  const slug = name
-    .normalize('NFD').replace(/[\u0300-\u036f]/g, '') // remove acentos
-    .replace(/[^a-zA-Z0-9._-]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .toLowerCase()
-  return slug || 'devfactory-project'
-}
-
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ runId: string }> },
@@ -50,7 +44,7 @@ export async function POST(
 
   const { data: run, error } = await supabase
     .from('pipeline_runs')
-    .select('id, user_id, project_id, stage_outputs(stage, final_output), projects(name)')
+    .select('id, user_id, project_id, stage_outputs(stage, final_output), projects(name, github_owner, github_repo, github_branch)')
     .eq('id', runId)
     .single()
 
@@ -84,10 +78,30 @@ export async function POST(
     )
   }
 
-  const projectName = (run.projects as unknown as { name: string } | null)?.name ?? 'devfactory-project'
-  const repoName = `${slugifyRepoName(projectName)}-${runId.slice(0, 8)}`
+  const project = run.projects as unknown as {
+    name: string
+    github_owner: string | null
+    github_repo: string | null
+    github_branch: string | null
+  } | null
 
   try {
+    // Opção B (Fase 2): o repo já existe e já recebeu commit a cada etapa
+    // aprovada — não cria outro, só devolve a URL existente.
+    if (project?.github_owner && project.github_repo) {
+      return NextResponse.json({
+        ok:            true,
+        repoUrl:       `https://github.com/${project.github_owner}/${project.github_repo}`,
+        owner:         project.github_owner,
+        repo:          project.github_repo,
+        defaultBranch: project.github_branch ?? 'main',
+        alreadyExisted: true,
+      })
+    }
+
+    const projectName = project?.name ?? 'devfactory-project'
+    const repoName = `${slugifyRepoName(projectName)}-${runId.slice(0, 8)}`
+
     const created = await createRepository(repoName, token, {
       private: true,
       description: `Gerado pelo DevFactory a partir do run ${runId}`,

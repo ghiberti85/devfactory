@@ -36,10 +36,11 @@ import {
 import { createSelector, DEFAULT_MODELS, type Tier, type Stage as SelectorStage } from './model-selector'
 import { createRouter, type RouterProvider } from './complexity-router'
 import { createAgentRunner, resolveProviderConfig, type AgentProvider } from './agent-runner'
-import { getUserKeyring } from './run-registry'
+import { getUserKeyring, getUserGithubToken } from './run-registry'
 import { runQualityCheckInSandbox, type QualityDimension as SandboxDimension, type GeneratedFile } from './sandbox-runner'
 import { createSupabaseServiceClient } from './supabase'
 import { classifyDeployTarget } from './deploy-target'
+import { commitFiles } from './github-connector'
 
 // ─── Hook: gate humano ──────────────────────────────────────────────────────
 // Um único hook reutilizável; o token muda por run+etapa+iteração, então
@@ -213,6 +214,20 @@ async function runStageWithGate(run: ProjectRun, stage: PipelineStage): Promise<
     }
     run.status = 'failed'
     return run
+  }
+
+  // Opção B do fluxo de conexão GitHub (ver NewProjectForm): quando o
+  // usuário escolhe conectar o repositório desde o início em vez de só na
+  // hora de publicar, cada etapa aprovada vira um commit — o histórico do
+  // repo conta a evolução real da pipeline (PRD, spec, design, código).
+  //
+  // IMPORTANTE: usa publishRepo, NUNCA githubRepo — githubRepo é o repo de
+  // CONTEXTO do modo brownfield (só leitura, pro usuário existente); commitar
+  // nele automaticamente seria escrever sem permissão no repo de produção de
+  // alguém. publishRepo só existe quando o usuário explicitamente escolheu
+  // "conectar desde já" num projeto greenfield (ver app/api/runs/route.ts).
+  if (run.publishRepo) {
+    await persistStageCommitStep(run.userId, run.publishRepo, stage, finalOutput)
   }
 
   return approveStage(run, stage, decision)
@@ -438,6 +453,47 @@ async function persistStageFailedStep(runId: string, stage: PipelineStage, messa
     status: 'failed',
     final_output: { error: message },
   }).eq('run_id', runId).eq('stage', stage)
+}
+
+// ─── Commit por etapa (Fase 2, "opção B") ───────────────────────────────────
+
+const STAGE_COMMIT_FILENAME: Partial<Record<PipelineStage, string>> = {
+  codebase_analysis: 'devfactory/00-codebase-analysis.json',
+  planning:          'devfactory/01-planning.json',
+  docs_initial:      'devfactory/02-docs-initial.json',
+  design:            'devfactory/03-design.json',
+  tests:             'devfactory/05-tests.json',
+  quality_council:   'devfactory/06-quality-council.json',
+  docs_final:        'devfactory/07-docs-final.json',
+}
+
+async function persistStageCommitStep(
+  userId: string,
+  publishRepo: { owner: string; repo: string; branch: string },
+  stage: PipelineStage,
+  finalOutput: unknown,
+): Promise<void> {
+  'use step'
+  const token = await getUserGithubToken(userId)
+  if (!token) return // conexão pode ter sido removida no meio do run — não derruba a pipeline por isso
+
+  // backend/frontend geram files[] de verdade — commitam o código em si.
+  // As demais etapas geram JSON estruturado (PRD, spec, design tokens...)
+  // — commitam como snapshot legível em devfactory/, contando a história
+  // da geração no próprio log do git.
+  const isCodeStage = stage === 'backend' || stage === 'frontend'
+  const files = isCodeStage
+    ? ((finalOutput as { files?: GeneratedFile[] } | null)?.files ?? [])
+    : [{ path: STAGE_COMMIT_FILENAME[stage] ?? `devfactory/${stage}.json`, content: JSON.stringify(finalOutput, null, 2) }]
+
+  if (files.length === 0) return
+
+  try {
+    await commitFiles(publishRepo, token, files, `DevFactory: ${stage} aprovado`)
+  } catch {
+    // Falha de commit não deve derrubar a pipeline inteira — o usuário
+    // ainda pode publicar manualmente depois (Fase 3/4) se isso falhar.
+  }
 }
 
 async function persistIterationStep(
