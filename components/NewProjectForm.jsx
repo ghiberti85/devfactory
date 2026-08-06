@@ -243,6 +243,11 @@ export default function NewProjectForm({ onSubmit, onCancel }) {
   // (contexto de leitura, não alvo de commit).
   const [connectGithubEarly, setConnectGithubEarly] = useState(false)
 
+  // POST /api/projects → POST /api/runs → redirect leva alguns segundos;
+  // sem isso o botão não dava nenhum sinal de que o clique tinha
+  // funcionado, parecia travado.
+  const [starting, setStarting] = useState(false)
+
   const charCount   = briefing.length
   const wordCount   = briefing.trim() ? briefing.trim().split(/\s+/).length : 0
 
@@ -285,22 +290,30 @@ export default function NewProjectForm({ onSubmit, onCancel }) {
     setBriefing(tpl.template)
   }
 
-  function handleSubmit() {
-    if (!isValid) return
-    onSubmit?.({
-      projectName: projectName.trim(),
-      briefing:    briefing.trim(),
-      githubRepo:  projectSource === "existing" && selectedRepo
-        ? { owner: selectedRepo.owner, repo: selectedRepo.repo, branch: selectedRepo.defaultBranch }
-        : undefined,
-      config: {
-        selectorMode,
-        preferFreeTier,
-        maxIterationsPerStage: maxIterations,
-        budgetUsd: budgetUsd ? parseFloat(budgetUsd) : undefined,
-        connectGithubEarly: projectSource === "new" ? connectGithubEarly : false,
-      },
-    })
+  async function handleSubmit() {
+    if (!isValid || starting) return
+    setStarting(true)
+    try {
+      await onSubmit?.({
+        projectName: projectName.trim(),
+        briefing:    briefing.trim(),
+        githubRepo:  projectSource === "existing" && selectedRepo
+          ? { owner: selectedRepo.owner, repo: selectedRepo.repo, branch: selectedRepo.defaultBranch }
+          : undefined,
+        config: {
+          selectorMode,
+          preferFreeTier,
+          maxIterationsPerStage: maxIterations,
+          budgetUsd: budgetUsd ? parseFloat(budgetUsd) : undefined,
+          connectGithubEarly: projectSource === "new" ? connectGithubEarly : false,
+        },
+      })
+    } finally {
+      // Em caso de sucesso o onSubmit navega pra /runs/[id] e este componente
+      // desmonta antes disso rodar — o finally só importa mesmo pro caminho
+      // de erro, pra destravar o botão em vez de ficar preso "Iniciando...".
+      setStarting(false)
+    }
   }
 
   return (
@@ -311,6 +324,7 @@ export default function NewProjectForm({ onSubmit, onCancel }) {
         button { transition: all 0.15s; }
         input[type=range] { cursor: pointer; accent-color: ${T.violet}; }
         ::placeholder { color: #3a3a3a; }
+        @keyframes spin { to { transform: rotate(360deg); } }
       `}</style>
 
       <div style={{ maxWidth: 720, margin: "0 auto" }}>
@@ -683,27 +697,37 @@ Use este campo se você já sabe o que quer priorizar, por exemplo:
             </div>
           </div>
 
-          <div style={{ display: "flex", gap: 8 }}>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
             {onCancel && (
               <button
                 onClick={onCancel}
-                style={{ ...mono, fontSize: 12, padding: "10px 18px", borderRadius: 8, border: `1px solid ${T.border2}`, background: "transparent", color: T.text2, cursor: "pointer" }}
+                disabled={starting}
+                style={{ ...mono, fontSize: 12, padding: "10px 18px", borderRadius: 8, border: `1px solid ${T.border2}`, background: "transparent", color: T.text2, cursor: starting ? "not-allowed" : "pointer", opacity: starting ? 0.5 : 1 }}
               >
                 Cancelar
               </button>
             )}
             <button
               onClick={handleSubmit}
-              disabled={!isValid}
+              disabled={!isValid || starting}
               style={{
                 ...mono, fontSize: 12, padding: "10px 22px", borderRadius: 8, border: "none",
                 background: isValid ? T.violet : T.bg3,
                 color: isValid ? "#fff" : T.text2,
-                cursor: isValid ? "pointer" : "not-allowed",
+                cursor: isValid && !starting ? "pointer" : "not-allowed",
                 fontWeight: 600,
+                opacity: starting ? 0.75 : 1,
+                display: "flex", alignItems: "center", gap: 8,
               }}
             >
-              ▶ Iniciar Pipeline
+              {starting ? (
+                <>
+                  <span style={{ display: "inline-block", width: 12, height: 12, border: "2px solid #fff6", borderTopColor: "#fff", borderRadius: "50%", animation: "spin 0.7s linear infinite" }} />
+                  Iniciando pipeline...
+                </>
+              ) : (
+                "▶ Iniciar Pipeline"
+              )}
             </button>
           </div>
         </div>
