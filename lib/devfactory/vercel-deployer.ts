@@ -60,6 +60,7 @@ export async function createVercelProject(
     method: 'POST',
     body: {
       name,
+      framework: 'nextjs',
       gitRepository: { repo: `${gitRepo.owner}/${gitRepo.repo}`, type: 'github' },
     },
   })
@@ -78,7 +79,7 @@ export async function triggerDeployment(
   accessToken: string,
 ): Promise<DeploymentResult> {
   const data = await vercelFetch<{ id: string; url: string; readyState: string }>(
-    '/v13/deployments',
+    '/v13/deployments?skipAutoDetectionConfirmation=1',
     accessToken,
     {
       method: 'POST',
