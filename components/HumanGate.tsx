@@ -89,12 +89,20 @@ function useRunStream(runId: string) {
         setStatus('running')
       } else if (snapshot.status === 'completed' || snapshot.status === 'failed' || snapshot.status === 'cancelled') {
         setStatus(snapshot.status)
+        // Sem isso, o EventSource reconecta sozinho pra sempre depois que o
+        // run termina — o servidor fecha o stream (por design, ver
+        // stream/route.ts), mas o navegador trata qualquer close do lado do
+        // servidor como reconectável (mesmo os "limpos") a menos que o
+        // client chame close() explicitamente. Resultado observado em
+        // produção: ~489 requisições/hora nesse endpoint pro mesmo run já
+        // concluído, uma a cada poucos segundos, indefinidamente.
+        source.close()
       }
     })
     source.addEventListener('run.started',        e => { addEvent('run.started', e);                  setStatus('running') })
-    source.addEventListener('run.completed',      e => { addEvent('run.completed', e);                setStatus('completed'); setRun(prev => prev ? { ...prev, status: 'completed' } : null) })
-    source.addEventListener('run.failed',         e => { addEvent('run.failed', e);                   setStatus('failed') })
-    source.addEventListener('run.cancelled',      e => { addEvent('run.cancelled', e);                setStatus('cancelled') })
+    source.addEventListener('run.completed',      e => { addEvent('run.completed', e);                setStatus('completed'); setRun(prev => prev ? { ...prev, status: 'completed' } : null); source.close() })
+    source.addEventListener('run.failed',         e => { addEvent('run.failed', e);                   setStatus('failed'); source.close() })
+    source.addEventListener('run.cancelled',      e => { addEvent('run.cancelled', e);                setStatus('cancelled'); source.close() })
     source.addEventListener('stage.started',      e => { addEvent('stage.started', e);                setStatus('running'); setPendingStage(null) })
     source.addEventListener('stage.model_selected', e => addEvent('stage.model_selected', e))
     source.addEventListener('stage.executing',    e => addEvent('stage.executing', e))
