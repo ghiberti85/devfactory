@@ -683,21 +683,20 @@ function CompletedPanel({ run, runId }: { run: ProjectRun; runId: string }) {
     }
   }
 
-  // Fluxo combinado: cria o repositório (se ainda não existir) e na
-  // sequência linka+dispara o deploy na Vercel — um clique só, do jeito
-  // que o botão "Publicar" deveria funcionar.
+  // Fluxo combinado: cria/atualiza o repositório e na sequência
+  // linka+dispara o deploy na Vercel — um clique só, do jeito que o botão
+  // "Publicar"/"Republicar" deveria funcionar. Chama publish-repo mesmo
+  // quando repoUrl já é conhecido: a rota é idempotente e é o único lugar
+  // que garante o scaffold do Next.js (package.json/next.config/tsconfig)
+  // — pular essa chamada em republicações reimplanta o mesmo commit antigo.
   async function handlePublish() {
     setPublishError(null)
     try {
-      let currentRepoUrl = repoUrl
-      if (!currentRepoUrl) {
-        setPublishStep('repo')
-        const res = await fetch(`/api/runs/${runId}/publish-repo`, { method: 'POST' })
-        const body = await res.json()
-        if (!res.ok) throw new Error(body.error ?? 'Falha ao criar o repositório.')
-        currentRepoUrl = body.repoUrl
-        setRepoUrl(body.repoUrl)
-      }
+      setPublishStep('repo')
+      const repoRes = await fetch(`/api/runs/${runId}/publish-repo`, { method: 'POST' })
+      const repoBody = await repoRes.json()
+      if (!repoRes.ok) throw new Error(repoBody.error ?? 'Falha ao criar/atualizar o repositório.')
+      setRepoUrl(repoBody.repoUrl)
 
       setPublishStep('deploy')
       const res = await fetch(`/api/runs/${runId}/publish-vercel`, { method: 'POST' })
