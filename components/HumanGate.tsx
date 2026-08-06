@@ -650,6 +650,76 @@ function FailedPanel({ run, events }: { run: ProjectRun | null; events: LiveEven
   )
 }
 
+function CompletedPanel({ run, runId }: { run: ProjectRun; runId: string }) {
+  const [downloading, setDownloading] = useState(false)
+  const [downloadError, setDownloadError] = useState<string | null>(null)
+
+  async function handleDownload() {
+    setDownloading(true)
+    setDownloadError(null)
+    try {
+      const res = await fetch(`/api/runs/${runId}/download`)
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        throw new Error(body.error ?? 'Falha ao gerar o download.')
+      }
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `devfactory-${runId.slice(0, 8)}.zip`
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch (err) {
+      setDownloadError(err instanceof Error ? err.message : 'Falha ao gerar o download.')
+    } finally {
+      setDownloading(false)
+    }
+  }
+
+  const isFreeCost = run.totalCostUsd < 0.000001
+
+  return (
+    <div style={{
+      marginTop: 16, padding: 16, background: '#0a1a12', border: '1px solid #34d39933',
+      borderRadius: 10, display: 'flex', flexDirection: 'column', gap: 14,
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        <span style={{ fontSize: 24 }}>✅</span>
+        <div>
+          <div style={{ color: '#34d399', fontWeight: 600 }}>
+            Todas as {getPipelineStages(run.config.projectMode).length} etapas foram geradas e aprovadas
+          </div>
+          <div style={{ color: '#555', fontSize: 12, fontFamily: 'monospace', marginTop: 2 }}>
+            custo: {isFreeCost ? 'grátis (modelos free tier)' : `$${run.totalCostUsd.toFixed(6)} USD`}
+          </div>
+        </div>
+      </div>
+
+      {/* Aviso honesto: nada foi publicado — só os arquivos existem, salvos
+          no banco. Deploy automático (repositório GitHub + Vercel) ainda
+          não existe nesta versão. */}
+      <div style={{
+        background: '#111', border: '1px solid #2d2d2d', borderRadius: 8, padding: 12,
+        fontSize: 12, color: '#94a3b8', lineHeight: 1.6,
+      }}>
+        <strong style={{ color: '#e2e8f0' }}>Nenhum site foi publicado.</strong> O DevFactory ainda não faz
+        deploy automático — o que existe agora são os arquivos de código gerados (backend + frontend),
+        guardados neste run. Baixe o zip abaixo, rode <code>npm install</code> e depois <code>npm run dev</code>{' '}
+        localmente pra ver o resultado. Deploy automático (GitHub + Vercel com um clique) está em
+        desenvolvimento.
+      </div>
+
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+        <button onClick={handleDownload} disabled={downloading} style={btnStyle('#34d399')}>
+          {downloading ? 'Gerando .zip...' : '⬇ Baixar projeto (.zip)'}
+        </button>
+        {downloadError && <span style={{ color: '#f87171', fontSize: 11 }}>{downloadError}</span>}
+      </div>
+    </div>
+  )
+}
+
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function HumanGate({ runId, onComplete }: HumanGateProps) {
@@ -705,7 +775,10 @@ export default function HumanGate({ runId, onComplete }: HumanGateProps) {
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
         <div>
-          <h1 style={{ margin: 0, fontSize: 18, fontWeight: 700, letterSpacing: -0.5 }}>
+          <a href="/dashboard" style={{ color: '#555', fontSize: 11, fontFamily: 'monospace', textDecoration: 'none' }}>
+            ← Dashboard
+          </a>
+          <h1 style={{ margin: '4px 0 0', fontSize: 18, fontWeight: 700, letterSpacing: -0.5 }}>
             DevFactory
           </h1>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
@@ -789,24 +862,7 @@ export default function HumanGate({ runId, onComplete }: HumanGateProps) {
 
       {/* Completed */}
       {status === 'completed' && run && (
-        <div style={{
-          marginTop:    16,
-          padding:      16,
-          background:   '#0a1a12',
-          border:       '1px solid #34d39933',
-          borderRadius: 10,
-          display:      'flex',
-          alignItems:   'center',
-          gap:          12,
-        }}>
-          <span style={{ fontSize: 24 }}>✅</span>
-          <div>
-            <div style={{ color: '#34d399', fontWeight: 600 }}>Pipeline concluída com sucesso</div>
-            <div style={{ color: '#555', fontSize: 12, fontFamily: 'monospace', marginTop: 2 }}>
-              {getPipelineStages(run.config.projectMode).length} etapas •  custo total: ${run.totalCostUsd.toFixed(6)} USD
-            </div>
-          </div>
-        </div>
+        <CompletedPanel run={run} runId={runId} />
       )}
     </div>
   )
