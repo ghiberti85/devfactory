@@ -58,6 +58,22 @@ function gateToken(runId: string, stage: PipelineStage, iteration: number): stri
   return `devfactory:${runId}:${stage}:${iteration}`
 }
 
+// Erros propagados de dentro de um "use step" podem chegar como objeto
+// serializado em vez de instância real de Error — extrai a mensagem em
+// qualquer um dos formatos plausíveis em vez de assumir só `instanceof Error`.
+function extractErrorMessage(err: unknown): string {
+  if (err instanceof Error) return err.message
+  if (typeof err === 'string') return err
+  if (err && typeof err === 'object' && 'message' in err && typeof (err as { message: unknown }).message === 'string') {
+    return (err as { message: string }).message
+  }
+  try {
+    return JSON.stringify(err)
+  } catch {
+    return 'Erro desconhecido na etapa (não foi possível serializar o motivo).'
+  }
+}
+
 // ─── Prompts por etapa (mesmo conteúdo do orchestrator.ts original) ─────────
 
 const STAGE_OPERATIONS: Record<PipelineStage, string> = {
@@ -167,7 +183,13 @@ async function runStageWithGate(run: ProjectRun, stage: PipelineStage): Promise<
       // FatalError (ex: nenhum modelo disponível) mata o workflow, mas sem
       // isto o Postgres nunca saberia — a run.status ficava presa em
       // "running" pra sempre e a UI continuava girando indefinidamente.
-      const message = err instanceof Error ? err.message : 'Erro desconhecido na etapa.'
+      //
+      // Erros que atravessam a fronteira de um "use step" nem sempre chegam
+      // aqui como instância real de Error — o Workflow SDK pode serializar
+      // como objeto plano ({ name, message, stack }) ao propagar do step pro
+      // workflow. err instanceof Error sozinho perdia a mensagem real (ex:
+      // "google 429: quota exceeded...") e caía no fallback genérico.
+      const message = extractErrorMessage(err)
       await persistStageFailedStep(run.id, stage, message)
       throw err
     }
