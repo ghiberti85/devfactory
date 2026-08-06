@@ -17,6 +17,7 @@ import { getSessionUser, unauthorizedResponse } from '@/lib/devfactory/auth'
 import { createSupabaseServerClient } from '@/lib/devfactory/supabase'
 import { getUserGithubToken } from '@/lib/devfactory/run-registry'
 import { createRepository, commitFiles, slugifyRepoName } from '@/lib/devfactory/github-connector'
+import { ensureNextScaffold } from '@/lib/devfactory/next-scaffold'
 
 interface GeneratedFile {
   path:    string
@@ -44,7 +45,7 @@ export async function POST(
 
   const { data: run, error } = await supabase
     .from('pipeline_runs')
-    .select('id, user_id, project_id, stage_outputs(stage, final_output), projects(name, github_owner, github_repo, github_branch)')
+    .select('id, user_id, project_id, deploy_target, stage_outputs(stage, final_output), projects(name, github_owner, github_repo, github_branch)')
     .eq('id', runId)
     .single()
 
@@ -66,12 +67,21 @@ export async function POST(
   const stageOutputs = (run.stage_outputs ?? []) as { stage: string; final_output: unknown }[]
   const backend = stageOutputs.find(so => so.stage === 'backend')
   const frontend = stageOutputs.find(so => so.stage === 'frontend')
-  const allFiles = [
+  const generatedFiles = [
     ...extractFiles(backend?.final_output),
     ...extractFiles(frontend?.final_output),
   ]
 
-  if (allFiles.length === 0) {
+  // Sem isso, backend/frontend saem de duas chamadas de LLM que não se veem
+  // uma à outra — nenhuma garante package.json/next.config/tsconfig, e sem
+  // esses arquivos "vercel build" não reconhece o projeto (deploy fica
+  // READY mas o site é 404). Só se aplica quando a Fase 5 classificou o
+  // projeto como publicável via Vercel (deployTarget === 'vercel-serverless').
+  const allFiles = run.deploy_target === 'vercel-serverless'
+    ? ensureNextScaffold(generatedFiles)
+    : generatedFiles
+
+  if (generatedFiles.length === 0) {
     return NextResponse.json(
       { error: 'Nenhum arquivo gerado ainda — as etapas backend/frontend precisam estar aprovadas.' },
       { status: 409 },

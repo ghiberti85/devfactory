@@ -41,6 +41,7 @@ import { runQualityCheckInSandbox, type QualityDimension as SandboxDimension, ty
 import { createSupabaseServiceClient } from './supabase'
 import { classifyDeployTarget } from './deploy-target'
 import { commitFiles } from './github-connector'
+import { ensureNextScaffold } from './next-scaffold'
 
 // ─── Hook: gate humano ──────────────────────────────────────────────────────
 // Um único hook reutilizável; o token muda por run+etapa+iteração, então
@@ -249,7 +250,7 @@ async function runStageWithGate(run: ProjectRun, stage: PipelineStage): Promise<
   // alguém. publishRepo só existe quando o usuário explicitamente escolheu
   // "conectar desde já" num projeto greenfield (ver app/api/runs/route.ts).
   if (run.publishRepo) {
-    await persistStageCommitStep(run.userId, run.publishRepo, stage, finalOutput)
+    await persistStageCommitStep(run.userId, run.publishRepo, stage, finalOutput, run.deployTarget)
   }
 
   return approveStage(run, stage, decision)
@@ -494,6 +495,7 @@ async function persistStageCommitStep(
   publishRepo: { owner: string; repo: string; branch: string },
   stage: PipelineStage,
   finalOutput: unknown,
+  deployTarget?: 'vercel-serverless' | 'manual-export',
 ): Promise<void> {
   'use step'
   const token = await getUserGithubToken(userId)
@@ -504,9 +506,19 @@ async function persistStageCommitStep(
   // — commitam como snapshot legível em devfactory/, contando a história
   // da geração no próprio log do git.
   const isCodeStage = stage === 'backend' || stage === 'frontend'
-  const files = isCodeStage
+  let files = isCodeStage
     ? ((finalOutput as { files?: GeneratedFile[] } | null)?.files ?? [])
     : [{ path: STAGE_COMMIT_FILENAME[stage] ?? `devfactory/${stage}.json`, content: JSON.stringify(finalOutput, null, 2) }]
+
+  // Cada etapa de código commita sozinha (sem ver o que a outra gerou), então
+  // nenhuma garante os arquivos de raiz que fazem "vercel build" reconhecer o
+  // app — reforça o scaffold a cada commit de código, idempotente (só some
+  // quando o próprio arquivo gerado já existir no repo, que ensureNextScaffold
+  // não sabe checar aqui — mas commitFiles/base_tree do GitHub mescla por path,
+  // então sobrescrever com o mesmo scaffold é inofensivo).
+  if (isCodeStage && deployTarget === 'vercel-serverless' && files.length > 0) {
+    files = ensureNextScaffold(files)
+  }
 
   if (files.length === 0) return
 
