@@ -97,62 +97,93 @@ export async function POST(
 
     const { keyring, userProviders } = await getUserKeyring(user.id)
     const selector = createSelector([])
-    const selection = selector.select({
-      stage:          'frontend',
-      operation:      'refine',
-      tier:           2,
-      preferFreeTier: true,
-      userProviders,
-    })
-
-    const isPlatformFree = selection.model.hasFreeTier || selection.model.isLocal
-    const { apiKey, baseUrl } = isPlatformFree
-      ? { apiKey: process.env[`PLATFORM_${selection.model.provider.toUpperCase()}_FREE_TIER_KEY`] ?? '', baseUrl: undefined }
-      : resolveProviderConfig(selection.model.provider as AgentProvider, keyring)
 
     const filesContext = currentFiles
       .map(f => `--- ${f.path} ---\n${f.content}`)
       .join('\n\n')
       .slice(0, 60_000) // teto de segurança de contexto
 
-    // Timeout maior que o default (120s) — contexto de até 60KB de código
-    // + até 16000 tokens de output legitimamente passa dos 120s às vezes.
-    const runner = createAgentRunner({ timeoutMs: 240_000 })
-    const result = await runner.run({
-      stage:     'frontend',
-      operation: 'refine',
-      modelId:   selection.model.modelId,
-      provider:  selection.model.provider as AgentProvider,
-      apiKey,
-      baseUrl,
-      systemPrompt: `Você é um Frontend/Backend Engineer sênior fazendo um AJUSTE PONTUAL num app Next.js já publicado em produção.
-Aplique SOMENTE a mudança pedida pelo usuário — não reescreva, reformate ou "melhore" nada que não foi pedido.
-Retorne JSON: { "files": [{ "path": "...", "content": "..." }] } contendo APENAS os arquivos que você de fato precisou modificar,
-cada um com o conteúdo COMPLETO já corrigido (não um diff/patch). Se não for necessário alterar nenhum arquivo pra atender o
-pedido, retorne { "files": [] }. Responda APENAS em JSON.`,
-      userPrompt: `## Pedido do usuário:\n${instruction}\n\n## Código-fonte atual do app:\n${filesContext}`,
-      previousOutputs: [],
-      maxTokens:   16000,
-      temperature: 0.2,
-    })
+    const systemPrompt = `Você é um Frontend/Backend Engineer sênior fazendo um ajuste num app Next.js já publicado em produção —
+pode ser desde uma correção pontual (ex.: remover um link quebrado) até um pedido com várias partes (corrigir bugs, adicionar
+novas seções/componentes de UI, etc.) — atenda TUDO que foi pedido, por completo, sem pular partes por serem trabalhosas.
+Não altere nada que não foi pedido (não "melhore" código não relacionado).
+Retorne JSON: { "files": [{ "path": "...", "content": "..." }] } contendo TODOS os arquivos que precisou criar ou modificar
+pra atender o pedido por completo, cada um com o conteúdo COMPLETO (não um diff/patch). Se o pedido envolver criar um
+componente novo (ex.: um card, um accordion), crie o arquivo novo E atualize quem precisa importá-lo. Se não for necessário
+alterar nenhum arquivo, retorne { "files": [] }. Responda APENAS em JSON.`
+    const userPrompt = `## Pedido do usuário:\n${instruction}\n\n## Código-fonte atual do app:\n${filesContext}`
 
-    const output = result.output as { files?: unknown; _parseError?: boolean } | null
-    if (output?._parseError) {
-      return NextResponse.json({ error: 'O modelo não retornou uma resposta válida — tenta descrever o ajuste de outro jeito ou tenta de novo.' }, { status: 502 })
+    // Pedidos maiores (várias seções/componentes novos) legitimamente
+    // precisam de mais tokens de output do que uma correção pontual — se a
+    // 1ª tentativa vier cortada (JSON inválido, ver extractJSON em
+    // agent-runner.ts), escala tier + orçamento de tokens em vez de só
+    // devolver "descreva de outro jeito", que não ajuda em nada quando o
+    // pedido já estava bem formado.
+    const attempts: Array<{ tier: 1 | 2 | 3; maxTokens: number }> = [
+      { tier: 2, maxTokens: 16000 },
+      { tier: 3, maxTokens: 32000 },
+    ]
+
+    let files: GeneratedFile[] = []
+    let modelUsed = ''
+    let lastParseFailed = false
+
+    for (const attempt of attempts) {
+      const selection = selector.select({
+        stage:          'frontend',
+        operation:      'refine',
+        tier:           attempt.tier,
+        preferFreeTier: true,
+        userProviders,
+      })
+
+      const isPlatformFree = selection.model.hasFreeTier || selection.model.isLocal
+      const { apiKey, baseUrl } = isPlatformFree
+        ? { apiKey: process.env[`PLATFORM_${selection.model.provider.toUpperCase()}_FREE_TIER_KEY`] ?? '', baseUrl: undefined }
+        : resolveProviderConfig(selection.model.provider as AgentProvider, keyring)
+
+      // Timeout maior que o default (120s) — contexto de até 60KB de código
+      // + até 32000 tokens de output legitimamente passa dos 120s às vezes.
+      const runner = createAgentRunner({ timeoutMs: 280_000 })
+      const result = await runner.run({
+        stage:     'frontend',
+        operation: 'refine',
+        modelId:      selection.model.modelId,
+        provider:     selection.model.provider as AgentProvider,
+        apiKey,
+        baseUrl,
+        systemPrompt,
+        userPrompt,
+        previousOutputs: [],
+        maxTokens:    attempt.maxTokens,
+        temperature:  0.2,
+      })
+
+      const output = result.output as { files?: unknown; _parseError?: boolean } | null
+      lastParseFailed = Boolean(output?._parseError)
+      if (lastParseFailed) continue // tenta de novo com mais orçamento
+
+      files = Array.isArray(output?.files)
+        ? (output.files as unknown[]).filter(
+            (f): f is GeneratedFile =>
+              !!f && typeof f === 'object' && typeof (f as GeneratedFile).path === 'string' && typeof (f as GeneratedFile).content === 'string',
+          )
+        : []
+      modelUsed = selection.model.displayName
+      break
     }
 
-    const files = Array.isArray(output?.files)
-      ? (output.files as unknown[]).filter(
-          (f): f is GeneratedFile =>
-            !!f && typeof f === 'object' && typeof (f as GeneratedFile).path === 'string' && typeof (f as GeneratedFile).content === 'string',
-        )
-      : []
+    if (lastParseFailed && files.length === 0) {
+      return NextResponse.json({
+        error: 'A resposta do modelo veio incompleta mesmo após tentar com mais orçamento de tokens — pedidos muito grandes (várias seções novas de uma vez) às vezes precisam ser divididos em dois pedidos menores.',
+      }, { status: 502 })
+    }
 
     if (files.length === 0) {
       return NextResponse.json({ error: 'O modelo não encontrou nenhuma alteração a fazer para esse pedido.' }, { status: 422 })
     }
 
-    return NextResponse.json({ ok: true, files, model: selection.model.displayName })
+    return NextResponse.json({ ok: true, files, model: modelUsed })
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Falha ao gerar o ajuste.'
     return NextResponse.json({ error: message }, { status: 502 })
