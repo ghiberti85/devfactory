@@ -126,8 +126,15 @@ async function withRetry<T>(
     } catch (err) {
       lastError = err instanceof Error ? err : new Error(String(err))
 
-      // Não retry em erros de autenticação/quota
-      if (lastError.message.includes('401') || lastError.message.includes('403')) {
+      // Não retry em erros de autenticação/quota/rate-limit — retentar o
+      // MESMO provider em segundos não resolve nada (rate limit costuma
+      // levar dezenas de segundos a minutos pra liberar) e só atrasa o
+      // fallback pra outro provider em runSingleStageStep.
+      if (
+        lastError.message.includes('401') ||
+        lastError.message.includes('403') ||
+        lastError.message.includes('429')
+      ) {
         throw lastError
       }
 

@@ -82,6 +82,7 @@ export interface SelectionContext {
   preferFreeTier?: boolean       // forçar uso de modelos gratuitos
   preferLocal?: boolean          // forçar Ollama
   excludeOrigins?: ModelOrigin[] // ex: ['chinese'] por questões de compliance
+  excludeProviders?: Provider[] // provider que acabou de falhar (ex: 429) nesta mesma iteração — não tentar de novo
 
   // ── BYOK enforcement ──────────────────────────────────────────────────────
   // Providers para os quais o USUÁRIO ATUAL configurou sua própria API key.
@@ -326,6 +327,9 @@ export class ModelSelector {
 
       // Excluir origens (ex: compliance)
       if (ctx.excludeOrigins?.includes(m.origin)) return false
+
+      // Excluir provider que acabou de rate-limitar/falhar nesta iteração
+      if (ctx.excludeProviders?.includes(m.provider)) return false
 
       // Budget: estima custo médio e filtra se ultrapassar budget restante
       if (ctx.budgetRemainingUsd !== undefined) {

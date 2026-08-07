@@ -316,28 +316,8 @@ async function runSingleStageStep(
   })
 
   const selector = createSelector([])
-  let selection
-  try {
-    selection = selector.select({
-      stage:          stage as SelectorStage,
-      operation,
-      tier:           Math.max(tier, routerOutput.tier) as Tier,
-      preferFreeTier: run.config.preferFreeTier,
-      userProviders:  run.userProviders as AgentProvider[],
-    })
-  } catch (err) {
-    // Sem candidato disponível (ex: tier exige modelo pago e o usuário não
-    // configurou key) — retry não resolveria nada, então é FatalError, não
-    // RetryableError. O workflow para aqui em vez de tentar 3x à toa.
-    throw new FatalError(err instanceof Error ? err.message : 'Nenhum modelo disponível para esta operação.')
-  }
-
-  // Resolve a key NA HORA — nunca persistida no workflow
   const { keyring } = await getUserKeyring(run.userId)
-  const isPlatformFree = selection.model.hasFreeTier || selection.model.isLocal
-  const { apiKey, baseUrl } = isPlatformFree
-    ? { apiKey: process.env[`PLATFORM_${selection.model.provider.toUpperCase()}_FREE_TIER_KEY`] ?? '', baseUrl: undefined }
-    : resolveProviderConfig(selection.model.provider as AgentProvider, keyring)
+  const runner = createAgentRunner()
 
   // Etapas de código (backend/frontend/tests) geram vários arquivos por
   // resposta — 8192 tokens é fácil de estourar, e uma resposta cortada no
@@ -347,20 +327,65 @@ async function runSingleStageStep(
   const isCodeStage = stage === 'backend' || stage === 'frontend' || stage === 'tests'
   const maxTokens = isCodeStage && tier > 1 ? 16000 : 8192
 
-  const runner = createAgentRunner()
-  const result = await runner.run({
-    stage,
-    operation,
-    modelId:      selection.model.modelId,
-    provider:     selection.model.provider as AgentProvider,
-    apiKey,
-    baseUrl,
-    systemPrompt: buildSystemPrompt(stage, run),
-    userPrompt:   buildUserPrompt(stage, run, previousOutput),
-    previousOutputs: previousOutput ? [previousOutput] : [],
-    maxTokens,
-    temperature:  0.2,
-  })
+  // Fallback de provider em rate limit (429): retentar o MESMO provider
+  // segundos depois não resolve nada (visto em produção: GLM 429 "rate
+  // limit" derrubou o step inteiro após 3 tentativas ao mesmo provider,
+  // mesmo havendo outros candidatos elegíveis no mesmo tier). Em vez de
+  // deixar o step inteiro falhar, escolhe outro modelo excluindo o
+  // provider que acabou de rate-limitar — até esgotar os candidatos.
+  const excludeProviders: AgentProvider[] = []
+  let selection: ReturnType<typeof selector.select>
+  let result: Awaited<ReturnType<typeof runner.run>>
+
+  for (let attempt = 0; ; attempt++) {
+    try {
+      selection = selector.select({
+        stage:          stage as SelectorStage,
+        operation,
+        tier:           Math.max(tier, routerOutput.tier) as Tier,
+        preferFreeTier: run.config.preferFreeTier,
+        userProviders:  run.userProviders as AgentProvider[],
+        excludeProviders,
+      })
+    } catch (err) {
+      // Sem candidato disponível (ex: tier exige modelo pago e o usuário não
+      // configurou key, ou todos os providers elegíveis já rate-limitaram
+      // nesta iteração) — retry não resolveria nada, então é FatalError, não
+      // RetryableError. O workflow para aqui em vez de tentar 3x à toa.
+      throw new FatalError(err instanceof Error ? err.message : 'Nenhum modelo disponível para esta operação.')
+    }
+
+    // Resolve a key NA HORA — nunca persistida no workflow
+    const isPlatformFree = selection.model.hasFreeTier || selection.model.isLocal
+    const { apiKey, baseUrl } = isPlatformFree
+      ? { apiKey: process.env[`PLATFORM_${selection.model.provider.toUpperCase()}_FREE_TIER_KEY`] ?? '', baseUrl: undefined }
+      : resolveProviderConfig(selection.model.provider as AgentProvider, keyring)
+
+    try {
+      result = await runner.run({
+        stage,
+        operation,
+        modelId:      selection.model.modelId,
+        provider:     selection.model.provider as AgentProvider,
+        apiKey,
+        baseUrl,
+        systemPrompt: buildSystemPrompt(stage, run),
+        userPrompt:   buildUserPrompt(stage, run, previousOutput),
+        previousOutputs: previousOutput ? [previousOutput] : [],
+        maxTokens,
+        temperature:  0.2,
+      })
+      break
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      const isRateLimit = message.includes('429')
+      if (isRateLimit && attempt < 2) {
+        excludeProviders.push(selection.model.provider as AgentProvider)
+        continue
+      }
+      throw err
+    }
+  }
 
   // JSON cortado/malformado (extractJSON caiu no fallback { content,
   // _parseError: true }) não tem estrutura nenhuma — sem isso, um output
