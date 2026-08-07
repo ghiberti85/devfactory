@@ -137,7 +137,6 @@ const FALLBACK_PAGE = `export default function Page() {
 const FALLBACK_GLOBALS_CSS = `${TAILWIND_DIRECTIVES}\nhtml, body {\n  padding: 0;\n  margin: 0;\n}\n`
 
 const NEXT_CONFIG_NAMES = ['next.config.js', 'next.config.ts', 'next.config.mjs']
-const APP_ENTRY_PATTERN = /^app\/(page|layout)\.(t|j)sx?$/
 const SOURCE_FILE_PATTERN = /\.(t|j)sx?$/
 
 // ─── Dependências: pacotes que o código gerado importa mas que o npm não
@@ -302,11 +301,18 @@ export function ensureNextScaffold(files: GeneratedFile[]): GeneratedFile[] {
     result.push({ path: 'tailwind.config.ts', content: DEFAULT_TAILWIND_CONFIG })
   }
 
-  const hasAppEntry = result.some(f => APP_ENTRY_PATTERN.test(f.path))
-  if (!hasAppEntry) {
-    if (!paths.has('app/layout.tsx')) result.push({ path: 'app/layout.tsx', content: FALLBACK_LAYOUT })
-    if (!paths.has('app/page.tsx')) result.push({ path: 'app/page.tsx', content: FALLBACK_PAGE })
-  }
+  // Next.js exige um app/layout.tsx pra QUALQUER página existir, inclusive
+  // rotas aninhadas — checar isso independente de page.tsx era o bug: se a
+  // IA gerasse app/page.tsx mas esquecesse o layout (comum — os prompts
+  // pedem "App Router" mas não garantem as duas peças juntas), o
+  // APP_ENTRY_PATTERN batia em QUALQUER um dos dois e pulava o fallback do
+  // que estava faltando. Build falhava com "page.tsx doesn't have a root
+  // layout" mesmo com o site aparentemente completo.
+  const hasRootLayout = paths.has('app/layout.tsx')
+  const hasAnyPage = result.some(f => /^app\/(.*\/)?page\.(t|j)sx?$/.test(f.path))
+
+  if (!hasRootLayout) result.push({ path: 'app/layout.tsx', content: FALLBACK_LAYOUT })
+  if (!hasAnyPage) result.push({ path: 'app/page.tsx', content: FALLBACK_PAGE })
 
   result = ensureTailwindWiring(result)
   result = result.map(ensureUseClientDirective)

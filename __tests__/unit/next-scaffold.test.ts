@@ -2,6 +2,15 @@ import { describe, expect, it } from 'vitest'
 import { ensureNextScaffold } from '@/lib/devfactory/next-scaffold'
 
 describe('ensureNextScaffold', () => {
+  it('adds a fallback app/layout.tsx when the AI generated app/page.tsx without one', () => {
+    const result = ensureNextScaffold([
+      { path: 'app/page.tsx', content: `export default function Page() { return <main>hi</main> }` },
+    ])
+    expect(result.some(f => f.path === 'app/layout.tsx')).toBe(true)
+    // e não deve duplicar o page.tsx que a IA já escreveu
+    expect(result.filter(f => f.path === 'app/page.tsx')).toHaveLength(1)
+  })
+
   it('adds missing bare-import dependencies to package.json', () => {
     const result = ensureNextScaffold([
       { path: 'app/api/leads/route.ts', content: `import { z } from 'zod'\nexport async function POST() {}` },
