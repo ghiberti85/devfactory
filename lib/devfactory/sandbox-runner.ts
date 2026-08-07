@@ -31,11 +31,17 @@ export interface QualityCheckResult {
 }
 
 // Ferramenta + comando por dimensão. Tudo CLI padrão — sem nada proprietário.
+//
+// "security" NÃO usa semgrep — semgrep é uma ferramenta Python (pip install),
+// mas o sandbox roda runtime: 'node24', sem Python/pip disponível. Isso
+// falhava a instalação sempre, 100% das vezes, em produção. Em vez de gerir
+// um runtime Python só pra essa dimensão, security usa um scanner Node
+// autocontido (SECURITY_SCAN_SCRIPT abaixo) — zero instalação, zero rede.
 const DIMENSION_TOOLING: Record<QualityDimension, { tool: string; installCmd: string[]; runCmd: string[] }> = {
   security: {
-    tool: 'semgrep',
-    installCmd: ['pip', 'install', '--quiet', 'semgrep'],
-    runCmd: ['semgrep', '--config=auto', '--json', '.'],
+    tool: 'devfactory-security-scan',
+    installCmd: [],
+    runCmd: ['node', '__devfactory_security_scan.mjs'],
   },
   performance: {
     tool: 'lighthouse-ci',
@@ -127,10 +133,15 @@ export async function runQualityCheckInSandbox(
 
   try {
     await writeFiles(sandbox, files)
+    if (dimension === 'security') {
+      await sandbox.writeFiles([{ path: '__devfactory_security_scan.mjs', content: SECURITY_SCAN_SCRIPT }])
+    }
 
-    const install = await sandbox.runCommand({ cmd: tooling.installCmd[0], args: tooling.installCmd.slice(1) })
-    if (install.exitCode !== 0) {
-      return emptyResult(dimension, tooling.tool, 'Falha ao instalar ferramenta de análise.')
+    if (tooling.installCmd.length > 0) {
+      const install = await sandbox.runCommand({ cmd: tooling.installCmd[0], args: tooling.installCmd.slice(1) })
+      if (install.exitCode !== 0) {
+        return emptyResult(dimension, tooling.tool, 'Falha ao instalar ferramenta de análise.')
+      }
     }
 
     // Lockdown de rede antes de analisar código gerado pela IA
@@ -140,13 +151,62 @@ export async function runQualityCheckInSandbox(
     const result = await sandbox.runCommand({ cmd, args })
     const rawOutput = await result.stdout()
 
-    return parseToolOutput(dimension, tooling.tool, rawOutput, result.exitCode)
+    return dimension === 'security'
+      ? parseSecurityScanOutput(tooling.tool, rawOutput, result.exitCode)
+      : parseToolOutput(dimension, tooling.tool, rawOutput, result.exitCode)
   } catch (err) {
     return emptyResult(dimension, tooling.tool, err instanceof Error ? err.message : 'Erro desconhecido na sandbox.')
   } finally {
     await sandbox.stop()
   }
 }
+
+// Scanner autocontido, sem dependências — roda com `node` puro, que já
+// existe no runtime do sandbox. Varre os arquivos gerados por padrões de
+// risco comuns (heurística, não substitui uma ferramenta dedicada como
+// semgrep, mas funciona de verdade no ambiente disponível). Emite um JSON
+// num formato que ESTA aplicação controla, então parseSecurityScanOutput
+// não precisa adivinhar o schema de saída de uma ferramenta de terceiros.
+const SECURITY_SCAN_SCRIPT = `
+import { readdirSync, readFileSync, statSync } from 'node:fs'
+import { join, extname } from 'node:path'
+
+const SOURCE_EXT = new Set(['.ts', '.tsx', '.js', '.jsx'])
+const SKIP_DIRS = new Set(['node_modules', '.next', '.git'])
+
+const PATTERNS = [
+  { re: /\\beval\\s*\\(/, severity: 'high', message: 'eval() executa string como código — risco de injeção.' },
+  { re: /new\\s+Function\\s*\\(/, severity: 'high', message: 'new Function() executa string como código — risco de injeção.' },
+  { re: /dangerouslySetInnerHTML/, severity: 'medium', message: 'dangerouslySetInnerHTML sem sanitização visível — risco de XSS.' },
+  { re: /child_process\\.(exec|execSync)\\s*\\(\\s*\`/, severity: 'high', message: 'exec/execSync com template literal — risco de command injection se incluir input não sanitizado.' },
+  { re: /(api[_-]?key|secret|password|token)\\s*[:=]\\s*['"][A-Za-z0-9_\\-]{16,}['"]/i, severity: 'high', message: 'Possível credencial hardcoded no código — mover para variável de ambiente.' },
+  { re: /process\\.env\\.\\w+\\s*\\+\\s*['"]/, severity: 'low', message: 'Concatenação direta de env var em string — revisar se pode vazar em log/erro.' },
+]
+
+function walk(dir, out = []) {
+  for (const entry of readdirSync(dir)) {
+    if (SKIP_DIRS.has(entry)) continue
+    const full = join(dir, entry)
+    const stat = statSync(full)
+    if (stat.isDirectory()) walk(full, out)
+    else if (SOURCE_EXT.has(extname(entry))) out.push(full)
+  }
+  return out
+}
+
+const issues = []
+for (const file of walk('.')) {
+  const content = readFileSync(file, 'utf-8')
+  const lines = content.split('\\n')
+  for (const { re, severity, message } of PATTERNS) {
+    lines.forEach((line, i) => {
+      if (re.test(line)) issues.push({ severity, message, location: \`\${file}:\${i + 1}\` })
+    })
+  }
+}
+
+process.stdout.write(JSON.stringify({ issues }))
+`
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -160,6 +220,26 @@ function emptyResult(dimension: QualityDimension, model: string, message: string
   return {
     dimension, score: 0, verdict: 'fail', model, rawOutput: message,
     issues: [{ severity: 'high', message }],
+  }
+}
+
+function parseSecurityScanOutput(
+  model:     string,
+  rawOutput: string,
+  exitCode:  number,
+): QualityCheckResult {
+  try {
+    const parsed = JSON.parse(rawOutput) as { issues: QualityCheckResult['issues'] }
+    const issues = Array.isArray(parsed.issues) ? parsed.issues : []
+    const penalty = issues.reduce((sum, i) => sum + (i.severity === 'high' ? 25 : i.severity === 'medium' ? 10 : 4), 0)
+    const score = Math.max(0, 100 - penalty)
+    return {
+      dimension: 'security', model, rawOutput, issues,
+      score,
+      verdict: score >= 80 ? 'pass' : score >= 60 ? 'warn' : 'fail',
+    }
+  } catch {
+    return emptyResult('security', model, exitCode === 0 ? 'Scan rodou mas não retornou JSON válido.' : `Scan falhou (exit ${exitCode}).`)
   }
 }
 
