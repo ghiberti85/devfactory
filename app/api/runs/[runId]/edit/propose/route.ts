@@ -127,50 +127,74 @@ alterar nenhum arquivo, retorne { "files": [] }. Responda APENAS em JSON.`
     let files: GeneratedFile[] = []
     let modelUsed = ''
     let lastParseFailed = false
+    const rateLimitedProviders: AgentProvider[] = []
+    const runner = createAgentRunner({ timeoutMs: 280_000 })
 
-    for (const attempt of attempts) {
-      const selection = selector.select({
-        stage:          'frontend',
-        operation:      'refine',
-        tier:           attempt.tier,
-        preferFreeTier: true,
-        userProviders,
-      })
+    outer: for (const attempt of attempts) {
+      // Rate limit (429) num provider não é motivo pra escalar tier nem
+      // desistir — é motivo pra tentar outro provider no MESMO tier (visto
+      // em produção: GLM "该模型当前访问量过大" — infra externa sobrecarregada,
+      // nada a ver com o tamanho do pedido). Mesmo padrão de fallback já
+      // usado em runSingleStageStep (pipeline-workflow.ts).
+      for (let providerAttempt = 0; providerAttempt < 3; providerAttempt++) {
+        let selection
+        try {
+          selection = selector.select({
+            stage:          'frontend',
+            operation:      'refine',
+            tier:           attempt.tier,
+            preferFreeTier: true,
+            userProviders,
+            excludeProviders: rateLimitedProviders,
+          })
+        } catch {
+          break outer // esgotou candidatos neste tier (e nos anteriores) — não adianta tentar o próximo tier
+        }
 
-      const isPlatformFree = selection.model.hasFreeTier || selection.model.isLocal
-      const { apiKey, baseUrl } = isPlatformFree
-        ? { apiKey: process.env[`PLATFORM_${selection.model.provider.toUpperCase()}_FREE_TIER_KEY`] ?? '', baseUrl: undefined }
-        : resolveProviderConfig(selection.model.provider as AgentProvider, keyring)
+        const isPlatformFree = selection.model.hasFreeTier || selection.model.isLocal
+        const { apiKey, baseUrl } = isPlatformFree
+          ? { apiKey: process.env[`PLATFORM_${selection.model.provider.toUpperCase()}_FREE_TIER_KEY`] ?? '', baseUrl: undefined }
+          : resolveProviderConfig(selection.model.provider as AgentProvider, keyring)
 
-      // Timeout maior que o default (120s) — contexto de até 60KB de código
-      // + até 32000 tokens de output legitimamente passa dos 120s às vezes.
-      const runner = createAgentRunner({ timeoutMs: 280_000 })
-      const result = await runner.run({
-        stage:     'frontend',
-        operation: 'refine',
-        modelId:      selection.model.modelId,
-        provider:     selection.model.provider as AgentProvider,
-        apiKey,
-        baseUrl,
-        systemPrompt,
-        userPrompt,
-        previousOutputs: [],
-        maxTokens:    attempt.maxTokens,
-        temperature:  0.2,
-      })
+        let result
+        try {
+          // Timeout maior que o default (120s) — contexto de até 60KB de
+          // código + até 32000 tokens de output passa dos 120s às vezes.
+          result = await runner.run({
+            stage:     'frontend',
+            operation: 'refine',
+            modelId:      selection.model.modelId,
+            provider:     selection.model.provider as AgentProvider,
+            apiKey,
+            baseUrl,
+            systemPrompt,
+            userPrompt,
+            previousOutputs: [],
+            maxTokens:    attempt.maxTokens,
+            temperature:  0.2,
+          })
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err)
+          if (message.includes('429')) {
+            rateLimitedProviders.push(selection.model.provider as AgentProvider)
+            continue // outro provider, mesmo tier
+          }
+          throw err
+        }
 
-      const output = result.output as { files?: unknown; _parseError?: boolean } | null
-      lastParseFailed = Boolean(output?._parseError)
-      if (lastParseFailed) continue // tenta de novo com mais orçamento
+        const output = result.output as { files?: unknown; _parseError?: boolean } | null
+        lastParseFailed = Boolean(output?._parseError)
+        if (lastParseFailed) break // tenta o próximo tier (mais orçamento), não o mesmo provider de novo
 
-      files = Array.isArray(output?.files)
-        ? (output.files as unknown[]).filter(
-            (f): f is GeneratedFile =>
-              !!f && typeof f === 'object' && typeof (f as GeneratedFile).path === 'string' && typeof (f as GeneratedFile).content === 'string',
-          )
-        : []
-      modelUsed = selection.model.displayName
-      break
+        files = Array.isArray(output?.files)
+          ? (output.files as unknown[]).filter(
+              (f): f is GeneratedFile =>
+                !!f && typeof f === 'object' && typeof (f as GeneratedFile).path === 'string' && typeof (f as GeneratedFile).content === 'string',
+            )
+          : []
+        modelUsed = selection.model.displayName
+        break outer
+      }
     }
 
     if (lastParseFailed && files.length === 0) {
