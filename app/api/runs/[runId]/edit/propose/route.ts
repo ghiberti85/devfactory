@@ -113,22 +113,33 @@ componente novo (ex.: um card, um accordion), crie o arquivo novo E atualize que
 alterar nenhum arquivo, retorne { "files": [] }. Responda APENAS em JSON.`
     const userPrompt = `## Pedido do usuário:\n${instruction}\n\n## Código-fonte atual do app:\n${filesContext}`
 
-    // Pedidos maiores (várias seções/componentes novos) legitimamente
-    // precisam de mais tokens de output do que uma correção pontual — se a
-    // 1ª tentativa vier cortada (JSON inválido, ver extractJSON em
-    // agent-runner.ts), escala tier + orçamento de tokens em vez de só
-    // devolver "descreva de outro jeito", que não ajuda em nada quando o
-    // pedido já estava bem formado.
+    // Começa no tier 1 (rápido, geralmente free tier) — a maioria dos
+    // ajustes é pequena e não precisa de um modelo caro. Só escala tier
+    // (mais orçamento de tokens) se a tentativa anterior vier cortada.
     const attempts: Array<{ tier: 1 | 2 | 3; maxTokens: number }> = [
+      { tier: 1, maxTokens: 12000 },
       { tier: 2, maxTokens: 16000 },
       { tier: 3, maxTokens: 32000 },
     ]
 
+    // Orçamento de tempo TOTAL da rota, não por tentativa — sem isso, 2
+    // tiers × 3 providers × um timeout individual generoso somava fácil
+    // mais que os 300s do maxDuration da função, e quando a Vercel mata a
+    // função no meio a resposta vira uma página de erro da plataforma (não
+    // JSON), o que o cliente tentava JSON.parse cegamente e quebrava com
+    // "unexpected character at line 1 column 1". Agora cada tentativa
+    // individual é mais curta (90s) E paramos de tentar mais uma vez perto
+    // do teto, devolvendo um erro JSON claro em vez de deixar a plataforma
+    // derrubar a função sem controle.
+    const startedAt = Date.now()
+    const DEADLINE_MS = 260_000 // ~40s de margem sob o teto de 300s
+
     let files: GeneratedFile[] = []
     let modelUsed = ''
     let lastParseFailed = false
+    let timedOut = false
     const rateLimitedProviders: AgentProvider[] = []
-    const runner = createAgentRunner({ timeoutMs: 280_000 })
+    const runner = createAgentRunner({ timeoutMs: 90_000 })
 
     outer: for (const attempt of attempts) {
       // Rate limit (429) num provider não é motivo pra escalar tier nem
@@ -136,7 +147,9 @@ alterar nenhum arquivo, retorne { "files": [] }. Responda APENAS em JSON.`
       // em produção: GLM "该模型当前访问量过大" — infra externa sobrecarregada,
       // nada a ver com o tamanho do pedido). Mesmo padrão de fallback já
       // usado em runSingleStageStep (pipeline-workflow.ts).
-      for (let providerAttempt = 0; providerAttempt < 3; providerAttempt++) {
+      for (let providerAttempt = 0; providerAttempt < 2; providerAttempt++) {
+        if (Date.now() - startedAt > DEADLINE_MS) { timedOut = true; break outer }
+
         let selection
         try {
           selection = selector.select({
@@ -195,6 +208,12 @@ alterar nenhum arquivo, retorne { "files": [] }. Responda APENAS em JSON.`
         modelUsed = selection.model.displayName
         break outer
       }
+    }
+
+    if (timedOut && files.length === 0) {
+      return NextResponse.json({
+        error: 'O ajuste está demorando demais (esgotamos o tempo tentando diferentes modelos) — tenta de novo em instantes, ou descreve um pedido menor/mais específico.',
+      }, { status: 504 })
     }
 
     if (lastParseFailed && files.length === 0) {

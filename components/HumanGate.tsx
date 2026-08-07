@@ -658,6 +658,25 @@ function FailedPanel({ run, events }: { run: ProjectRun | null; events: LiveEven
   )
 }
 
+// Lê o body como JSON só depois de confirmar que É JSON — uma função que
+// passa do teto de duração da plataforma pode ser derrubada no meio e
+// devolver uma página de erro HTML/texto simples em vez do JSON esperado.
+// res.json() cego nesse caso lança "JSON.parse: unexpected character..." —
+// uma mensagem que não diz nada sobre o que realmente aconteceu.
+async function parseJsonResponse(res: Response): Promise<{ error?: string; [key: string]: unknown }> {
+  const contentType = res.headers.get('content-type') ?? ''
+  if (!contentType.includes('application/json')) {
+    return { error: res.status === 504 || res.status === 502
+      ? 'O servidor demorou demais pra responder — tenta de novo em instantes.'
+      : `Resposta inesperada do servidor (status ${res.status}).` }
+  }
+  try {
+    return await res.json()
+  } catch {
+    return { error: 'Resposta do servidor veio corrompida — tenta de novo.' }
+  }
+}
+
 function CompletedPanel({ run, runId }: { run: ProjectRun; runId: string }) {
   const [downloading, setDownloading] = useState(false)
   const [downloadError, setDownloadError] = useState<string | null>(null)
@@ -737,9 +756,9 @@ function CompletedPanel({ run, runId }: { run: ProjectRun; runId: string }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ instruction: editInstruction }),
       })
-      const body = await res.json()
+      const body = await parseJsonResponse(res)
       if (!res.ok) throw new Error(body.error ?? 'Falha ao gerar o ajuste.')
-      setProposedFiles(body.files)
+      setProposedFiles(body.files as { path: string; content: string }[])
     } catch (err) {
       setEditError(err instanceof Error ? err.message : 'Falha ao gerar o ajuste.')
     } finally {
@@ -757,10 +776,10 @@ function CompletedPanel({ run, runId }: { run: ProjectRun; runId: string }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ files: proposedFiles, instruction: editInstruction }),
       })
-      const body = await res.json()
+      const body = await parseJsonResponse(res)
       if (!res.ok) throw new Error(body.error ?? 'Falha ao aplicar o ajuste.')
-      if (body.deploymentUrl) setDeploymentUrl(body.deploymentUrl)
-      setEditSuccess(body.warning ?? (body.deployed ? 'Ajuste aplicado — novo deploy disparado.' : 'Ajuste commitado.'))
+      if (typeof body.deploymentUrl === 'string') setDeploymentUrl(body.deploymentUrl)
+      setEditSuccess(typeof body.warning === 'string' ? body.warning : (body.deployed ? 'Ajuste aplicado — novo deploy disparado.' : 'Ajuste commitado.'))
       setProposedFiles(null)
       setEditInstruction('')
     } catch (err) {
