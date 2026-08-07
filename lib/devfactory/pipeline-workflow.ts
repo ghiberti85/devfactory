@@ -62,7 +62,8 @@ function gateToken(runId: string, stage: PipelineStage, iteration: number): stri
 // Erros propagados de dentro de um "use step" podem chegar como objeto
 // serializado em vez de instância real de Error — extrai a mensagem em
 // qualquer um dos formatos plausíveis em vez de assumir só `instanceof Error`.
-function extractErrorMessage(err: unknown): string {
+// Exportado — edit-workflow.ts (o workflow do "✎ Ajustar") reusa a mesma lógica.
+export function extractErrorMessage(err: unknown): string {
   if (err instanceof Error) return err.message
   if (typeof err === 'string') return err
   if (err && typeof err === 'object' && 'message' in err && typeof (err as { message: unknown }).message === 'string') {

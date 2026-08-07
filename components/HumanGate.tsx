@@ -688,12 +688,106 @@ function CompletedPanel({ run, runId }: { run: ProjectRun; runId: string }) {
   const [deploymentUrl, setDeploymentUrl] = useState<string | null>(run.vercelDeploymentUrl ?? null)
   const [placeholderEnvVars, setPlaceholderEnvVars] = useState<string[]>([])
 
-  // ── "✎ Ajustar" — patch pontual pós-publicação (propose → revisão → apply) ──
+  // ── "✎ Ajustar" — patch pontual pós-publicação, como Vercel Workflow
+  // durável (edit-workflow.ts) acompanhado por SSE — mesmo padrão da
+  // pipeline principal (useRunStream), sem chamada de LLM bloqueando uma
+  // rota HTTP síncrona (a versão anterior tinha timeout embutido no teto de
+  // duração da função, e nenhum ajuste de parâmetro resolvia isso de vez).
   const [editInstruction, setEditInstruction] = useState('')
-  const [editStep, setEditStep] = useState<'idle' | 'proposing' | 'applying'>('idle')
+  const [editId, setEditId] = useState<string | null>(null)
+  const [editStatus, setEditStatus] = useState<'idle' | 'starting' | 'running' | 'awaiting_review' | 'applying' | 'completed' | 'failed' | 'rejected'>('idle')
   const [editError, setEditError] = useState<string | null>(null)
   const [proposedFiles, setProposedFiles] = useState<{ path: string; content: string }[] | null>(null)
-  const [editSuccess, setEditSuccess] = useState<string | null>(null)
+  const [editResult, setEditResult] = useState<{ commitUrl?: string; deploymentUrl?: string } | null>(null)
+  const editSourceRef = useRef<EventSource | null>(null)
+
+  useEffect(() => {
+    if (!editId) return
+
+    const source = new EventSource(`/api/runs/${runId}/edit/${editId}/stream`)
+    editSourceRef.current = source
+
+    source.addEventListener('edit.snapshot', e => {
+      const data = JSON.parse(e.data) as {
+        payload: {
+          status: typeof editStatus
+          proposed_files?: { path: string; content: string }[] | null
+          error?: string | null
+          commit_url?: string | null
+          deployment_url?: string | null
+        }
+      }
+      const snapshot = data.payload
+      setEditStatus(snapshot.status)
+      if (snapshot.proposed_files) setProposedFiles(snapshot.proposed_files)
+      if (snapshot.error) setEditError(snapshot.error)
+      if (snapshot.status === 'completed') {
+        setEditResult({ commitUrl: snapshot.commit_url ?? undefined, deploymentUrl: snapshot.deployment_url ?? undefined })
+        if (snapshot.deployment_url) setDeploymentUrl(snapshot.deployment_url)
+      }
+      // Sem isso, o EventSource reconecta sozinho pra sempre depois que o
+      // ajuste termina — mesmo bug já corrigido em useRunStream (ver
+      // comentário lá): a Vercel fecha o stream, e o navegador trata
+      // qualquer close do lado do servidor como reconectável a menos que o
+      // client chame close() explicitamente.
+      if (['completed', 'failed', 'rejected'].includes(snapshot.status)) {
+        source.close()
+      }
+    })
+
+    source.addEventListener('edit.not_found', () => source.close())
+    source.onerror = () => {} // stream fecha por design a ~4,5min e reconecta sozinho — não é falha
+
+    return () => source.close()
+  }, [editId, runId])
+
+  async function handleStartEdit() {
+    setEditError(null)
+    setEditResult(null)
+    setProposedFiles(null)
+    setEditStatus('starting')
+    try {
+      const res = await fetch(`/api/runs/${runId}/edit/start`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ instruction: editInstruction }),
+      })
+      const body = await parseJsonResponse(res)
+      if (!res.ok) throw new Error(body.error ?? 'Falha ao iniciar o ajuste.')
+      setEditId(body.editId as string)
+      setEditStatus('running')
+    } catch (err) {
+      setEditError(err instanceof Error ? err.message : 'Falha ao iniciar o ajuste.')
+      setEditStatus('idle')
+    }
+  }
+
+  async function handleEditDecision(decision: 'approved' | 'rejected') {
+    if (!editId) return
+    setEditError(null)
+    try {
+      const res = await fetch(`/api/runs/${runId}/edit/${editId}/decision`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ decision }),
+      })
+      const body = await parseJsonResponse(res)
+      if (!res.ok) throw new Error(body.error ?? 'Falha ao registrar a decisão.')
+      setEditStatus(decision === 'approved' ? 'applying' : 'rejected')
+    } catch (err) {
+      setEditError(err instanceof Error ? err.message : 'Falha ao registrar a decisão.')
+    }
+  }
+
+  function handleNewEdit() {
+    editSourceRef.current?.close()
+    setEditId(null)
+    setEditStatus('idle')
+    setEditInstruction('')
+    setProposedFiles(null)
+    setEditError(null)
+    setEditResult(null)
+  }
 
   async function handleDownload() {
     setDownloading(true)
@@ -744,54 +838,6 @@ function CompletedPanel({ run, runId }: { run: ProjectRun; runId: string }) {
     } finally {
       setPublishStep('idle')
     }
-  }
-
-  async function handleProposeEdit() {
-    setEditError(null)
-    setEditSuccess(null)
-    setEditStep('proposing')
-    try {
-      const res = await fetch(`/api/runs/${runId}/edit/propose`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ instruction: editInstruction }),
-      })
-      const body = await parseJsonResponse(res)
-      if (!res.ok) throw new Error(body.error ?? 'Falha ao gerar o ajuste.')
-      setProposedFiles(body.files as { path: string; content: string }[])
-    } catch (err) {
-      setEditError(err instanceof Error ? err.message : 'Falha ao gerar o ajuste.')
-    } finally {
-      setEditStep('idle')
-    }
-  }
-
-  async function handleApplyEdit() {
-    if (!proposedFiles) return
-    setEditError(null)
-    setEditStep('applying')
-    try {
-      const res = await fetch(`/api/runs/${runId}/edit/apply`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ files: proposedFiles, instruction: editInstruction }),
-      })
-      const body = await parseJsonResponse(res)
-      if (!res.ok) throw new Error(body.error ?? 'Falha ao aplicar o ajuste.')
-      if (typeof body.deploymentUrl === 'string') setDeploymentUrl(body.deploymentUrl)
-      setEditSuccess(typeof body.warning === 'string' ? body.warning : (body.deployed ? 'Ajuste aplicado — novo deploy disparado.' : 'Ajuste commitado.'))
-      setProposedFiles(null)
-      setEditInstruction('')
-    } catch (err) {
-      setEditError(err instanceof Error ? err.message : 'Falha ao aplicar o ajuste.')
-    } finally {
-      setEditStep('idle')
-    }
-  }
-
-  function handleDiscardEdit() {
-    setProposedFiles(null)
-    setEditError(null)
   }
 
   const isFreeCost = run.totalCostUsd < 0.000001
@@ -892,7 +938,7 @@ function CompletedPanel({ run, runId }: { run: ProjectRun; runId: string }) {
             pedida, você revisa antes de aplicar, e commita + republica automaticamente.
           </div>
 
-          {!proposedFiles ? (
+          {(editStatus === 'idle' || editStatus === 'starting') && (
             <>
               <textarea
                 value={editInstruction}
@@ -900,19 +946,28 @@ function CompletedPanel({ run, runId }: { run: ProjectRun; runId: string }) {
                 placeholder="O que você quer ajustar?"
                 rows={2}
                 style={textareaStyle}
-                disabled={editStep === 'proposing'}
+                disabled={editStatus === 'starting'}
               />
               <div>
                 <button
-                  onClick={handleProposeEdit}
-                  disabled={editStep === 'proposing' || !editInstruction.trim()}
+                  onClick={handleStartEdit}
+                  disabled={editStatus === 'starting' || !editInstruction.trim()}
                   style={btnStyle('#a78bfa')}
                 >
-                  {editStep === 'proposing' ? 'Gerando ajuste...' : 'Gerar ajuste'}
+                  {editStatus === 'starting' ? 'Iniciando...' : 'Gerar ajuste'}
                 </button>
               </div>
             </>
-          ) : (
+          )}
+
+          {editStatus === 'running' && (
+            <div style={{ color: '#94a3b8', fontSize: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ animation: 'pulse 1.5s infinite' }}>◉</span> Gerando o ajuste... isso roda em segundo plano, pode
+              levar alguns minutos pra pedidos maiores — não precisa manter esta aba aberta.
+            </div>
+          )}
+
+          {editStatus === 'awaiting_review' && proposedFiles && (
             <>
               <div style={{ color: '#94a3b8', fontSize: 12 }}>
                 {proposedFiles.length} arquivo{proposedFiles.length > 1 ? 's' : ''} alterado{proposedFiles.length > 1 ? 's' : ''} — revise antes de aplicar:
@@ -928,18 +983,43 @@ function CompletedPanel({ run, runId }: { run: ProjectRun; runId: string }) {
                 ))}
               </div>
               <div style={{ display: 'flex', gap: 8 }}>
-                <button onClick={handleApplyEdit} disabled={editStep === 'applying'} style={btnStyle('#34d399')}>
-                  {editStep === 'applying' ? 'Aplicando...' : '✓ Aplicar e publicar'}
+                <button onClick={() => handleEditDecision('approved')} style={btnStyle('#34d399')}>
+                  ✓ Aplicar e publicar
                 </button>
-                <button onClick={handleDiscardEdit} disabled={editStep === 'applying'} style={btnStyle('#f87171', true)}>
+                <button onClick={() => handleEditDecision('rejected')} style={btnStyle('#f87171', true)}>
                   ✗ Descartar
                 </button>
               </div>
             </>
           )}
 
+          {editStatus === 'applying' && (
+            <div style={{ color: '#94a3b8', fontSize: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ animation: 'pulse 1.5s infinite' }}>◉</span> Aplicando — commitando e republicando...
+            </div>
+          )}
+
+          {editStatus === 'completed' && (
+            <div style={{ color: '#34d399', fontSize: 12 }}>
+              ✓ Ajuste aplicado{editResult?.deploymentUrl ? ' — novo deploy disparado.' : ' e commitado.'}{' '}
+              <a onClick={handleNewEdit} style={{ color: '#a78bfa', cursor: 'pointer', textDecoration: 'underline' }}>Fazer outro ajuste</a>
+            </div>
+          )}
+
+          {editStatus === 'rejected' && (
+            <div style={{ color: '#94a3b8', fontSize: 12 }}>
+              Ajuste descartado — nada foi alterado.{' '}
+              <a onClick={handleNewEdit} style={{ color: '#a78bfa', cursor: 'pointer', textDecoration: 'underline' }}>Tentar outro ajuste</a>
+            </div>
+          )}
+
+          {editStatus === 'failed' && (
+            <div>
+              <a onClick={handleNewEdit} style={{ color: '#a78bfa', cursor: 'pointer', textDecoration: 'underline', fontSize: 11 }}>Tentar de novo</a>
+            </div>
+          )}
+
           {editError && <span style={{ color: '#f87171', fontSize: 11 }}>{editError}</span>}
-          {editSuccess && <span style={{ color: '#34d399', fontSize: 11 }}>{editSuccess}</span>}
         </div>
       )}
     </div>

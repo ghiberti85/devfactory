@@ -187,6 +187,36 @@ create policy "users manage only their own runs"
   using (auth.uid() = user_id)
   with check (auth.uid() = user_id);
 
+-- ─── Ajustes pontuais pós-publicação ("✎ Ajustar") ─────────────────────────
+-- Roda como um Vercel Workflow durável (edit-workflow.ts), igual à pipeline
+-- principal — não como uma chamada de LLM bloqueada dentro de uma rota HTTP
+-- síncrona (a versão anterior disso tinha timeout embutido no teto de
+-- duração da função, e nenhum ajuste de parâmetro resolvia isso de vez).
+
+create table run_edits (
+  id              uuid primary key default gen_random_uuid(),
+  run_id          uuid references pipeline_runs(id) on delete cascade,
+  user_id         uuid references auth.users(id) not null,
+  instruction     text not null,
+  status          text default 'running', -- running | awaiting_review | applying | completed | failed | rejected
+  proposed_files  jsonb,
+  model_used      text,
+  error           text,
+  commit_url      text,
+  deployment_url  text,
+  gate_token      text,
+  workflow_run_id text,
+  created_at      timestamptz default now(),
+  updated_at      timestamptz default now()
+);
+
+alter table run_edits enable row level security;
+
+create policy "users manage only their own edits"
+  on run_edits for all
+  using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
+
 -- ─── Output de cada etapa ───────────────────────────────────────────────────
 
 create table stage_outputs (
