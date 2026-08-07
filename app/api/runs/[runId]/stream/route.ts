@@ -71,8 +71,18 @@ export async function GET(
   const { runId } = await params
   const encoder = new TextEncoder()
   let lastSnapshotJSON = ''
-  let lastStatus: string | null = null
   let sentStarted = false
+
+  // Semeia lastStatus/sentStarted com o estado JÁ atual antes do loop —
+  // sem isso, toda reconexão (o stream fecha e o EventSource reabre
+  // sozinho a cada ~4,5min por causa do maxDuration da função, mesmo com
+  // um gate humano ainda pendente) tratava o status corrente como se
+  // fosse uma transição nova, reemitindo stage.awaiting_human pra um gate
+  // que já estava sendo mostrado — na prática, parecia pedir aprovação
+  // duas vezes pra mesma etapa.
+  const seedSnapshot = await fetchRunSnapshot(req, runId, user.id)
+  let lastStatus: string | null = seedSnapshot?.status ?? null
+  if (seedSnapshot && seedSnapshot.status === 'running') sentStarted = true
 
   const stream = new ReadableStream({
     async start(controller) {
