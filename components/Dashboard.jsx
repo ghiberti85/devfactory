@@ -424,38 +424,75 @@ function SummaryRow({ isMobile, onInfo, summary }) {
   )
 }
 
+const RUNS_PER_PAGE = 5
+
 function RunsList({ onSelect, selected, onInfo, runs, onNewProject }) {
+  const [page, setPage] = useState(0)
+  const pageCount = Math.max(1, Math.ceil(runs.length / RUNS_PER_PAGE))
+  const safePage  = Math.min(page, pageCount - 1)
+  const pageRuns  = runs.slice(safePage * RUNS_PER_PAGE, safePage * RUNS_PER_PAGE + RUNS_PER_PAGE)
+
   return (
     <Card>
-      <Label infoKey="pipeline_runs" onInfo={onInfo}>Runs recentes</Label>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+        <Label infoKey="pipeline_runs" onInfo={onInfo} style={{ marginBottom: 0 }}>Runs recentes</Label>
+        {runs.length > RUNS_PER_PAGE && (
+          <span style={{ ...mono, fontSize: 9, color: T.text2 }}>
+            {safePage * RUNS_PER_PAGE + 1}–{Math.min(runs.length, safePage * RUNS_PER_PAGE + RUNS_PER_PAGE)} de {runs.length}
+          </span>
+        )}
+      </div>
       {runs.length === 0 ? (
         <EmptyState>
           Nenhum run ainda.{onNewProject && <> Clique em <a onClick={onNewProject} style={{ color: T.violet, cursor: "pointer" }}>Novo Projeto</a> pra criar o primeiro.</>}
         </EmptyState>
       ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          {runs.map(run => {
-            const isActive = selected === run.id
-            const statusColor = run.status === "completed" ? T.green : run.status === "failed" ? T.red : T.amber
-            const dateLabel = new Date(run.date).toLocaleDateString("pt-BR")
-            return (
-              <div key={run.id} onClick={() => onSelect(run.id === selected ? null : run.id)} style={{ padding: "10px 12px", borderRadius: 8, border: `1px solid ${isActive ? T.violet + "50" : T.border}`, background: isActive ? `${T.violet}08` : T.bg2, cursor: "pointer", transition: "all 0.15s" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
-                  <span style={{ fontSize: 12, color: isActive ? T.violet : T.text0, fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{run.name}</span>
-                  <span style={{ ...mono, fontSize: 10, color: statusColor, whiteSpace: "nowrap", flexShrink: 0 }}>
-                    {run.status === "running" || run.status === "awaiting_human" ? "◉ running" : run.status === "failed" ? "✕ failed" : "✓ done"}
-                  </span>
+        <>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {pageRuns.map(run => {
+              const isActive = selected === run.id
+              const statusColor = run.status === "completed" ? T.green : run.status === "failed" ? T.red : T.amber
+              const dateLabel = new Date(run.date).toLocaleDateString("pt-BR")
+              return (
+                <div key={run.id} onClick={() => onSelect(run.id === selected ? null : run.id)} style={{ padding: "10px 12px", borderRadius: 8, border: `1px solid ${isActive ? T.violet + "50" : T.border}`, background: isActive ? `${T.violet}08` : T.bg2, cursor: "pointer", transition: "all 0.15s" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                    <span style={{ fontSize: 12, color: isActive ? T.violet : T.text0, fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{run.name}</span>
+                    <span style={{ ...mono, fontSize: 10, color: statusColor, whiteSpace: "nowrap", flexShrink: 0 }}>
+                      {run.status === "running" || run.status === "awaiting_human" ? "◉ running" : run.status === "failed" ? "✕ failed" : "✓ done"}
+                    </span>
+                  </div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginTop: 6 }}>
+                    <span style={{ ...mono, fontSize: 10, color: T.text2 }}>{dateLabel}</span>
+                    <span style={{ ...mono, fontSize: 10, color: T.green }}>${run.totalCost.toFixed(4)}</span>
+                    <span style={{ ...mono, fontSize: 10, color: T.text2 }}>{run.stagesApproved}/{run.stagesTotal} etapas</span>
+                    {run.approvalRate !== null && <span style={{ ...mono, fontSize: 10, color: run.approvalRate >= 0.9 ? T.green : T.amber }}>{(run.approvalRate * 100).toFixed(0)}% aprovação</span>}
+                  </div>
                 </div>
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginTop: 6 }}>
-                  <span style={{ ...mono, fontSize: 10, color: T.text2 }}>{dateLabel}</span>
-                  <span style={{ ...mono, fontSize: 10, color: T.green }}>${run.totalCost.toFixed(4)}</span>
-                  <span style={{ ...mono, fontSize: 10, color: T.text2 }}>{run.stagesApproved}/{run.stagesTotal} etapas</span>
-                  {run.approvalRate !== null && <span style={{ ...mono, fontSize: 10, color: run.approvalRate >= 0.9 ? T.green : T.amber }}>{(run.approvalRate * 100).toFixed(0)}% aprovação</span>}
-                </div>
-              </div>
-            )
-          })}
-        </div>
+              )
+            })}
+          </div>
+          {pageCount > 1 && (
+            <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: 10, marginTop: 12 }}>
+              <button
+                onClick={() => setPage(p => Math.max(0, p - 1))}
+                disabled={safePage === 0}
+                aria-label="Página anterior"
+                style={{ ...mono, fontSize: 11, padding: "4px 10px", borderRadius: 6, border: `1px solid ${T.border2}`, background: "transparent", color: safePage === 0 ? T.text2 : T.text0, cursor: safePage === 0 ? "default" : "pointer", opacity: safePage === 0 ? 0.4 : 1 }}
+              >
+                ‹
+              </button>
+              <span style={{ ...mono, fontSize: 10, color: T.text2 }}>{safePage + 1} / {pageCount}</span>
+              <button
+                onClick={() => setPage(p => Math.min(pageCount - 1, p + 1))}
+                disabled={safePage === pageCount - 1}
+                aria-label="Próxima página"
+                style={{ ...mono, fontSize: 11, padding: "4px 10px", borderRadius: 6, border: `1px solid ${T.border2}`, background: "transparent", color: safePage === pageCount - 1 ? T.text2 : T.text0, cursor: safePage === pageCount - 1 ? "default" : "pointer", opacity: safePage === pageCount - 1 ? 0.4 : 1 }}
+              >
+                ›
+              </button>
+            </div>
+          )}
+        </>
       )}
     </Card>
   )
