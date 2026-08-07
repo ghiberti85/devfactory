@@ -217,7 +217,10 @@ create table stage_iterations (
   iteration_number int not null,
   operation       text,
   model_id        uuid references models(id),
+  model_provider  text, -- provider string da seleção real (ex: 'google','deepseek') — dashboard usa isso, não model_id (sempre null hoje, ver comentário em pipeline-workflow.ts)
+  model_label     text, -- displayName do modelo selecionado (ex: 'Gemini Flash-Lite')
   tier_used       int,
+  cost_usd        numeric(10,6) default 0, -- custo estimado desta iteração específica — pipeline_runs.total_cost_usd só guarda o acumulado do run inteiro
   prompt          text,
   output          jsonb,
   self_critique   jsonb,

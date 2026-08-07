@@ -3,8 +3,6 @@
 import { useState, useEffect, useCallback } from "react"
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, RadarChart, Radar, PolarGrid, PolarAngleAxis } from "recharts"
 
-// ─── Mock data ────────────────────────────────────────────────────────────────
-
 const STAGE_META = {
   planning:        { label: "Planning",   icon: "📋", color: "#a78bfa" },
   docs_initial:    { label: "Docs Init",  icon: "📄", color: "#60a5fa" },
@@ -15,69 +13,6 @@ const STAGE_META = {
   quality_council: { label: "Quality",    icon: "🛡️",  color: "#e879f9" },
   docs_final:      { label: "Docs Final", icon: "📚", color: "#94a3b8" },
 }
-
-const RUNS = [
-  { id: "r1", name: "LIV Incorporadora Website", status: "completed", date: "2026-06-20", totalCost: 0.0312, stages: 8, approvalRate: 0.94 },
-  { id: "r2", name: "DevInterviewLab v2",        status: "completed", date: "2026-06-24", totalCost: 0.0187, stages: 8, approvalRate: 0.88 },
-  { id: "r3", name: "Philosophia Oriental API",  status: "completed", date: "2026-06-27", totalCost: 0.0089, stages: 6, approvalRate: 1.00 },
-  { id: "r4", name: "Finanças do Casal PWA",     status: "running",   date: "2026-06-29", totalCost: 0.0041, stages: 3, approvalRate: null },
-]
-
-const COST_BY_STAGE = [
-  { stage: "Planning", cost: 0.0048 }, { stage: "Docs",     cost: 0.0018 },
-  { stage: "Design",   cost: 0.0021 }, { stage: "Backend",  cost: 0.0071 },
-  { stage: "Frontend", cost: 0.0038 }, { stage: "Tests",    cost: 0.0009 },
-  { stage: "Quality",  cost: 0.0024 }, { stage: "Docs F.",  cost: 0.0003 },
-]
-
-const MODEL_PERFORMANCE = [
-  { model: "DeepSeek V4 Pro Max", provider: "deepseek", origin: "chinese",     tier: 3, calls: 47,  approvals: 44,  cost: 0.0312, avgLatency: 4200, score: 0.94, strengths: ["coding","security"] },
-  { model: "Claude Opus 4.8",     provider: "anthropic",origin: "western",     tier: 3, calls: 31,  approvals: 30,  cost: 0.0187, avgLatency: 6800, score: 0.97, strengths: ["reasoning","security"] },
-  { model: "Claude Sonnet 4.6",   provider: "anthropic",origin: "western",     tier: 2, calls: 58,  approvals: 52,  cost: 0.0089, avgLatency: 3100, score: 0.90, strengths: ["coding","creative"] },
-  { model: "DeepSeek V4 Pro",     provider: "deepseek", origin: "chinese",     tier: 2, calls: 89,  approvals: 78,  cost: 0.0041, avgLatency: 2800, score: 0.88, strengths: ["coding","agentic"] },
-  { model: "Qwen 3.6 Plus",       provider: "qwen",     origin: "chinese",     tier: 2, calls: 34,  approvals: 30,  cost: 0.0021, avgLatency: 2400, score: 0.88, strengths: ["agentic"] },
-  { model: "Kimi K2.6",           provider: "moonshot", origin: "chinese",     tier: 2, calls: 22,  approvals: 19,  cost: 0.0015, avgLatency: 3300, score: 0.86, strengths: ["agentic"] },
-  { model: "MiniMax M3",          provider: "minimax",  origin: "chinese",     tier: 2, calls: 41,  approvals: 35,  cost: 0.0008, avgLatency: 2200, score: 0.85, strengths: ["coding"] },
-  { model: "DeepSeek V4 Flash",   provider: "deepseek", origin: "chinese",     tier: 1, calls: 112, approvals: 97,  cost: 0.0006, avgLatency: 980,  score: 0.87, strengths: ["coding"] },
-  { model: "Gemini 2.5 Flash",    provider: "google",   origin: "western",     tier: 1, calls: 78,  approvals: 67,  cost: 0.0002, avgLatency: 840,  score: 0.86, strengths: ["analysis"] },
-  { model: "Gemini Flash-Lite",   provider: "google",   origin: "western",     tier: 1, calls: 143, approvals: 122, cost: 0.0001, avgLatency: 620,  score: 0.85, strengths: ["analysis"] },
-  { model: "GLM-4.7 Flash",       provider: "glm",      origin: "chinese",     tier: 1, calls: 89,  approvals: 74,  cost: 0,      avgLatency: 710,  score: 0.83, strengths: ["coding"] },
-  { model: "Gemma 4 26B",         provider: "ollama",   origin: "open-source", tier: 1, calls: 67,  approvals: 55,  cost: 0,      avgLatency: 1840, score: 0.82, strengths: ["analysis"] },
-]
-
-const COST_TREND = [
-  { run: "Run 1", cost: 0.0312 }, { run: "Run 2", cost: 0.0187 },
-  { run: "Run 3", cost: 0.0089 }, { run: "Run 4", cost: 0.0041 },
-]
-
-const TIER_DISTRIBUTION = [
-  { tier: "Tier 1 — free/cheap", calls: 489, pct: 54 },
-  { tier: "Tier 2 — mid",        calls: 244, pct: 27 },
-  { tier: "Tier 3 — frontier",   calls: 175, pct: 19 },
-]
-
-const QUALITY_RADAR = [
-  { dimension: "Security", score: 91 }, { dimension: "Performance", score: 87 },
-  { dimension: "SEO",      score: 95 }, { dimension: "A11y",        score: 83 },
-  { dimension: "Best Practices", score: 89 },
-]
-
-const ORIGIN_SPLIT = [
-  { origin: "Chinese",     pct: 58, color: "#e879f9", cost: "$0.0028" },
-  { origin: "Western",     pct: 31, color: "#60a5fa", cost: "$0.0178" },
-  { origin: "Open-source", pct: 11, color: "#34d399", cost: "$0.0000" },
-]
-
-const LEARNING_EVENTS = [
-  { run: 1, event: "Selector usa heurística — sem histórico",                 tier: null, impact: "neutro"   },
-  { run: 1, event: "Claude Opus 4.8 → Planning: 100% aprovação",             tier: "T3", impact: "positivo" },
-  { run: 1, event: "DeepSeek V4 Flash → Tests: aprovado em 1ª iteração",     tier: "T1", impact: "positivo" },
-  { run: 2, event: "Selector pondera histórico: Opus priorizado em Planning", tier: "T3", impact: "neutro"   },
-  { run: 2, event: "GLM-4.7-Flash substituído em backend (score 0.62)",       tier: "T1", impact: "escalado" },
-  { run: 3, event: "Gemini Flash-Lite → Docs Final: 3 runs 100% aprovação",  tier: "T1", impact: "positivo" },
-  { run: 3, event: "DeepSeek V4 Pro Max favorito empírico em Backend T3",     tier: "T3", impact: "positivo" },
-  { run: 4, event: "Custo médio reduzido 87% vs Run 1",                       tier: null, impact: "ganho"    },
-]
 
 // ─── Info content ─────────────────────────────────────────────────────────────
 // Cada chave mapeia para o conteúdo do modal de ajuda
@@ -115,7 +50,7 @@ const INFO = {
       },
       {
         heading: "Comparação",
-        body: "Usando Claude Opus 4.8 em todas as operações, o mesmo volume custaria ~$4.20. O DevFactory reduz isso para ~$0.06 por arbitragem de modelo — sem perder qualidade nas decisões críticas."
+        body: "Veja a Calculadora de Economia mais abaixo pra uma estimativa de quanto rodar sempre no modelo mais caro do catálogo custaria, comparado ao seu custo médio real por run."
       }
     ]
   },
@@ -125,11 +60,11 @@ const INFO = {
     sections: [
       {
         heading: "O que conta como chamada?",
-        body: "Cada chamada ao modelo registrada: execução de agente, auto-crítica, e classificação do Complexity Router. Uma etapa com 2 iterações gera pelo menos 4 chamadas (2 execuções + 2 auto-críticas)."
+        body: "Cada iteração de etapa registrada — uma execução do agente principal seguida de auto-crítica. Uma etapa que precisa de retry gera mais de uma iteração/chamada."
       },
       {
         heading: "Chamadas gratuitas",
-        body: "54% das chamadas usam modelos com free tier (Gemini Flash, Flash-Lite) ou locais (Gemma 4 via Ollama) ou modelos chineses sem custo (GLM-4.7-Flash). O Complexity Router em si usa sempre modelos gratuitos."
+        body: "O Complexity Router em si sempre usa um modelo gratuito. Além dele, toda operação classificada como Tier 1 tende a usar modelos com free tier (Gemini Flash-Lite, GLM-4.7-Flash) ou locais (Ollama) — veja a proporção real na Distribuição de Tier."
       }
     ]
   },
@@ -139,15 +74,15 @@ const INFO = {
     sections: [
       {
         heading: "Como é calculada?",
-        body: "Proporção de iterações aprovadas ou aprovadas-com-edição pelo humano sobre o total de iterações que chegaram ao gate. Score composto: 60% aprovação humana + 30% auto-crítica + 10% custo."
+        body: "Proporção de etapas aprovadas (ou aprovadas-com-edição) pelo humano sobre o total de etapas que já passaram pelo gate em todos os seus runs. Score composto do Selector: 60% aprovação humana + 30% auto-crítica + 10% custo."
       },
       {
         heading: "Impacto no sistema",
         body: "O Model Performance History atualiza o score de cada modelo após cada gate. Com o tempo, o Selector passa a preferir empiricamente modelos com maior taxa de aprovação para cada etapa específica."
       },
       {
-        heading: "Por que melhorou?",
-        body: "O Selector aprendeu a evitar modelos que tiveram auto-crítica < 0.70 em etapas críticas, escalando para tier superior antes mesmo do gate humano. Isso reduziu rejeições de 18% (run 1) para 6% (run 4)."
+        heading: "Por que melhora com o tempo?",
+        body: "O Selector evita modelos que tiveram auto-crítica < 0.70 em etapas críticas, escalando para tier superior antes mesmo do gate humano. Quanto mais runs você tiver, mais essa tendência aparece nos seus próprios números — os valores nesta tela são sempre da sua conta, não uma média de mercado."
       }
     ]
   },
@@ -218,8 +153,8 @@ const INFO = {
         body: "A partir do run 2, o Selector começa a ponderar o histórico. Com mais de 5 chamadas por modelo/etapa, o histórico tem peso maior que a heurística inicial. O sistema essencialmente descobre empiricamente o melhor modelo para cada tarefa específica."
       },
       {
-        heading: "Resultado prático",
-        body: "Em 4 runs, o custo médio caiu 87% sem redução na taxa de aprovação humana. O sistema descobriu que DeepSeek V4 Flash é suficiente para Tests e Docs, reservando Opus apenas para Planning e Security — exatamente onde faz diferença."
+        heading: "O que observar aqui",
+        body: "Acompanhe se o custo médio por run cai ao longo do tempo sem queda na taxa de aprovação — esse é o sinal de que o Selector está encontrando o modelo mais barato que ainda passa no seu padrão de qualidade em cada etapa."
       }
     ]
   },
@@ -229,15 +164,15 @@ const INFO = {
     sections: [
       {
         heading: "Base de comparação",
-        body: "Compara o custo real do DevFactory ($0.0157/run em média) contra usar Claude Opus 4.8 para todas as operações (estimativa de $0.42/run baseada no volume de tokens médio observado)."
+        body: "Compara o custo médio real dos seus runs (calculado a partir do seu próprio histórico nesta conta) contra uma estimativa de rodar tudo sempre em Claude Opus — o modelo mais caro do catálogo, usado aqui só como teto de referência."
       },
       {
-        heading: "Por que a diferença é tão grande?",
-        body: "O Opus custa $5/$25 por 1M tokens. O DeepSeek V4 Flash custa $0.14/$0.28. Para operações de Tier 1 (54% do volume), essa diferença é de ~89x. Multiplicada por centenas de chamadas, o impacto é enorme."
+        heading: "Por que a diferença pode ser grande?",
+        body: "O Complexity Router manda a maioria das operações simples (boilerplate, docs, SEO) para modelos Tier 1 — muitos deles gratuitos. Só decisões críticas (auth, arquitetura, segurança) sobem para Tier 3. Multiplicado por várias chamadas por run, a diferença acumula rápido."
       },
       {
         heading: "Limitações da estimativa",
-        body: "Projetos com alta complexidade ou muitas iterações humanas terão custo maior. A calculadora usa a média atual de 4 runs, que inclui projetos relativamente simples. Projetos com muita lógica de negócio nova tendem a ter mais operações de Tier 3."
+        body: "Com poucos runs no histórico, a média ainda não é representativa — ela fica mais confiável conforme você acumula runs de projetos variados. Projetos com muita lógica de negócio nova tendem a ter mais operações Tier 3, elevando o custo médio real."
       }
     ]
   }
@@ -451,16 +386,26 @@ const CustomTooltip = ({ active, payload, label }) => {
 
 // ─── Sections ─────────────────────────────────────────────────────────────────
 
-function SummaryRow({ isMobile, onInfo }) {
-  const totalCost   = RUNS.reduce((s, r) => s + r.totalCost, 0)
-  const totalCalls  = MODEL_PERFORMANCE.reduce((s, m) => s + m.calls, 0)
-  const avgApproval = MODEL_PERFORMANCE.reduce((s, m) => s + m.approvals / m.calls, 0) / MODEL_PERFORMANCE.length
+function EmptyState({ children }) {
+  return (
+    <div style={{ padding: "20px 8px", textAlign: "center", fontSize: 11, color: T.text2, lineHeight: 1.6 }}>
+      {children}
+    </div>
+  )
+}
+
+function SummaryRow({ isMobile, onInfo, summary }) {
+  const totalRuns   = summary?.totalRuns ?? 0
+  const runningRuns = summary?.runningRuns ?? 0
+  const totalCost   = summary?.totalCost ?? 0
+  const totalCalls  = summary?.totalCalls ?? 0
+  const avgApproval = summary?.avgApproval
 
   const stats = [
-    { value: RUNS.length,                          label: "Pipeline runs",  sub: "3 done · 1 running",    color: T.violet, key: "pipeline_runs" },
-    { value: `$${totalCost.toFixed(4)}`,           label: "Total em LLMs", sub: "vs $4.20 single-model",  color: T.green,  key: "total_cost"    },
-    { value: totalCalls,                           label: "Chamadas",       sub: "54% gratuitas",          color: T.blue,   key: "total_calls"   },
-    { value: `${(avgApproval * 100).toFixed(0)}%`, label: "Aprovação",     sub: "↑ 6pp desde run 1",     color: T.amber,  key: "approval_rate" },
+    { value: totalRuns,                                                       label: "Pipeline runs",  sub: `${totalRuns - runningRuns} concluídos · ${runningRuns} em andamento`, color: T.violet, key: "pipeline_runs" },
+    { value: `$${totalCost.toFixed(4)}`,                                      label: "Total em LLMs",  sub: totalCost < 0.000001 ? "grátis até agora" : "acumulado nesta conta",   color: T.green,  key: "total_cost"    },
+    { value: totalCalls,                                                      label: "Chamadas",       sub: "iterações de etapa registradas",                                      color: T.blue,   key: "total_calls"   },
+    { value: avgApproval == null ? "—" : `${(avgApproval * 100).toFixed(0)}%`, label: "Aprovação",      sub: avgApproval == null ? "sem gates decididos ainda" : "das etapas decididas", color: T.amber,  key: "approval_rate" },
   ]
 
   return (
@@ -479,134 +424,174 @@ function SummaryRow({ isMobile, onInfo }) {
   )
 }
 
-function RunsList({ onSelect, selected, onInfo }) {
+function RunsList({ onSelect, selected, onInfo, runs, onNewProject }) {
   return (
     <Card>
       <Label infoKey="pipeline_runs" onInfo={onInfo}>Runs recentes</Label>
-      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-        {RUNS.map(run => {
-          const isActive = selected === run.id
-          const statusColor = run.status === "completed" ? T.green : T.amber
-          return (
-            <div key={run.id} onClick={() => onSelect(run.id === selected ? null : run.id)} style={{ padding: "10px 12px", borderRadius: 8, border: `1px solid ${isActive ? T.violet + "50" : T.border}`, background: isActive ? `${T.violet}08` : T.bg2, cursor: "pointer", transition: "all 0.15s" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
-                <span style={{ fontSize: 12, color: isActive ? T.violet : T.text0, fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{run.name}</span>
-                <span style={{ ...mono, fontSize: 10, color: statusColor, whiteSpace: "nowrap", flexShrink: 0 }}>{run.status === "running" ? "◉ running" : "✓ done"}</span>
+      {runs.length === 0 ? (
+        <EmptyState>
+          Nenhum run ainda.{onNewProject && <> Clique em <a onClick={onNewProject} style={{ color: T.violet, cursor: "pointer" }}>Novo Projeto</a> pra criar o primeiro.</>}
+        </EmptyState>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          {runs.map(run => {
+            const isActive = selected === run.id
+            const statusColor = run.status === "completed" ? T.green : run.status === "failed" ? T.red : T.amber
+            const dateLabel = new Date(run.date).toLocaleDateString("pt-BR")
+            return (
+              <div key={run.id} onClick={() => onSelect(run.id === selected ? null : run.id)} style={{ padding: "10px 12px", borderRadius: 8, border: `1px solid ${isActive ? T.violet + "50" : T.border}`, background: isActive ? `${T.violet}08` : T.bg2, cursor: "pointer", transition: "all 0.15s" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                  <span style={{ fontSize: 12, color: isActive ? T.violet : T.text0, fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{run.name}</span>
+                  <span style={{ ...mono, fontSize: 10, color: statusColor, whiteSpace: "nowrap", flexShrink: 0 }}>
+                    {run.status === "running" || run.status === "awaiting_human" ? "◉ running" : run.status === "failed" ? "✕ failed" : "✓ done"}
+                  </span>
+                </div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginTop: 6 }}>
+                  <span style={{ ...mono, fontSize: 10, color: T.text2 }}>{dateLabel}</span>
+                  <span style={{ ...mono, fontSize: 10, color: T.green }}>${run.totalCost.toFixed(4)}</span>
+                  <span style={{ ...mono, fontSize: 10, color: T.text2 }}>{run.stagesApproved}/{run.stagesTotal} etapas</span>
+                  {run.approvalRate !== null && <span style={{ ...mono, fontSize: 10, color: run.approvalRate >= 0.9 ? T.green : T.amber }}>{(run.approvalRate * 100).toFixed(0)}% aprovação</span>}
+                </div>
               </div>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginTop: 6 }}>
-                <span style={{ ...mono, fontSize: 10, color: T.text2 }}>{run.date}</span>
-                <span style={{ ...mono, fontSize: 10, color: T.green }}>${run.totalCost.toFixed(4)}</span>
-                <span style={{ ...mono, fontSize: 10, color: T.text2 }}>{run.stages}/8 etapas</span>
-                {run.approvalRate !== null && <span style={{ ...mono, fontSize: 10, color: run.approvalRate >= 0.9 ? T.green : T.amber }}>{(run.approvalRate * 100).toFixed(0)}% aprovação</span>}
-              </div>
-            </div>
-          )
-        })}
-      </div>
+            )
+          })}
+        </div>
+      )}
     </Card>
   )
 }
 
-function CostByStageChart({ onInfo }) {
+function CostByStageChart({ onInfo, data }) {
+  const withLabels = data.map(d => ({ ...d, label: STAGE_META[d.stage]?.label ?? d.stage }))
   return (
     <Card>
       <Label infoKey="total_cost" onInfo={onInfo}>Custo por etapa</Label>
-      <ResponsiveContainer width="100%" height={160}>
-        <BarChart data={COST_BY_STAGE} margin={{ top: 4, right: 4, left: -24, bottom: 0 }}>
-          <XAxis dataKey="stage" tick={{ ...mono, fontSize: 8, fill: T.text2 }} axisLine={false} tickLine={false} />
-          <YAxis tick={{ ...mono, fontSize: 8, fill: T.text2 }} axisLine={false} tickLine={false} tickFormatter={v => `$${v.toFixed(3)}`} />
-          <Tooltip content={<CustomTooltip />} />
-          <Bar dataKey="cost" radius={[4, 4, 0, 0]} name="cost">
-            {COST_BY_STAGE.map((_, i) => <Cell key={i} fill={Object.values(STAGE_META)[i]?.color ?? T.violet} opacity={0.85} />)}
-          </Bar>
-        </BarChart>
-      </ResponsiveContainer>
+      {data.length === 0 ? <EmptyState>Sem chamadas de modelo registradas ainda.</EmptyState> : (
+        <ResponsiveContainer width="100%" height={160}>
+          <BarChart data={withLabels} margin={{ top: 4, right: 4, left: -24, bottom: 0 }}>
+            <XAxis dataKey="label" tick={{ ...mono, fontSize: 8, fill: T.text2 }} axisLine={false} tickLine={false} />
+            <YAxis tick={{ ...mono, fontSize: 8, fill: T.text2 }} axisLine={false} tickLine={false} tickFormatter={v => `$${v.toFixed(3)}`} />
+            <Tooltip content={<CustomTooltip />} />
+            <Bar dataKey="cost" radius={[4, 4, 0, 0]} name="cost">
+              {withLabels.map((d, i) => <Cell key={i} fill={STAGE_META[d.stage]?.color ?? T.violet} opacity={0.85} />)}
+            </Bar>
+          </BarChart>
+        </ResponsiveContainer>
+      )}
     </Card>
   )
 }
 
-function CostTrendChart({ onInfo }) {
+function CostTrendChart({ onInfo, data }) {
+  const first = data[0]?.cost ?? 0
+  const last  = data[data.length - 1]?.cost ?? 0
+  const delta = first > 0 ? Math.round(((last - first) / first) * 100) : null
+
   return (
     <Card>
       <Label infoKey="learning_loop" onInfo={onInfo}>Custo por run</Label>
-      <ResponsiveContainer width="100%" height={150}>
-        <LineChart data={COST_TREND} margin={{ top: 4, right: 8, left: -24, bottom: 0 }}>
-          <XAxis dataKey="run" tick={{ ...mono, fontSize: 8, fill: T.text2 }} axisLine={false} tickLine={false} />
-          <YAxis tick={{ ...mono, fontSize: 8, fill: T.text2 }} axisLine={false} tickLine={false} tickFormatter={v => `$${v.toFixed(3)}`} />
-          <Tooltip content={<CustomTooltip />} />
-          <Line dataKey="cost" stroke={T.violet} strokeWidth={2} dot={{ fill: T.violet, r: 3 }} name="cost" />
-        </LineChart>
-      </ResponsiveContainer>
-      <div style={{ ...mono, fontSize: 10, color: T.green, marginTop: 8 }}>↓ 87% de redução em 4 runs</div>
+      {data.length < 2 ? <EmptyState>Precisa de pelo menos 2 runs concluídos pra mostrar uma tendência.</EmptyState> : (
+        <>
+          <ResponsiveContainer width="100%" height={150}>
+            <LineChart data={data} margin={{ top: 4, right: 8, left: -24, bottom: 0 }}>
+              <XAxis dataKey="run" tick={{ ...mono, fontSize: 8, fill: T.text2 }} axisLine={false} tickLine={false} />
+              <YAxis tick={{ ...mono, fontSize: 8, fill: T.text2 }} axisLine={false} tickLine={false} tickFormatter={v => `$${v.toFixed(3)}`} />
+              <Tooltip content={<CustomTooltip />} />
+              <Line dataKey="cost" stroke={T.violet} strokeWidth={2} dot={{ fill: T.violet, r: 3 }} name="cost" />
+            </LineChart>
+          </ResponsiveContainer>
+          {delta !== null && (
+            <div style={{ ...mono, fontSize: 10, color: delta <= 0 ? T.green : T.amber, marginTop: 8 }}>
+              {delta <= 0 ? "↓" : "↑"} {Math.abs(delta)}% do 1º ao último run
+            </div>
+          )}
+        </>
+      )}
     </Card>
   )
 }
 
-function TierDistribution({ onInfo }) {
+function TierDistribution({ onInfo, tierData, originData }) {
+  const hasTierData = tierData.some(t => t.calls > 0)
   return (
     <Card>
       <Label infoKey="tier_distribution" onInfo={onInfo}>Distribuição de tier & origem</Label>
-      <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 16 }}>
-        {TIER_DISTRIBUTION.map((t, i) => {
-          const colors = [T.green, T.amber, T.violet]
-          return (
-            <div key={i}>
-              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
-                <span style={{ fontSize: 11, color: T.text1 }}>{t.tier}</span>
-                <span style={{ ...mono, fontSize: 10, color: colors[i] }}>{t.pct}% · {t.calls} calls</span>
-              </div>
-              <ScoreBar score={t.pct / 100} color={colors[i]} height={5} />
-            </div>
-          )
-        })}
-      </div>
-      <div style={{ display: "flex", borderTop: `1px solid ${T.border}`, paddingTop: 14 }}>
-        {ORIGIN_SPLIT.map(o => (
-          <div key={o.origin} style={{ flex: 1, textAlign: "center" }}>
-            <div style={{ ...mono, fontSize: 20, fontWeight: 700, color: o.color }}>{o.pct}%</div>
-            <div style={{ fontSize: 10, color: T.text2, marginTop: 2 }}>{o.origin}</div>
-            <div style={{ ...mono, fontSize: 9, color: o.color }}>{o.cost}/call</div>
+      {!hasTierData ? <EmptyState>Sem iterações registradas ainda.</EmptyState> : (
+        <>
+          <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 16 }}>
+            {tierData.map((t, i) => {
+              const colors = [T.green, T.amber, T.violet]
+              return (
+                <div key={i}>
+                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+                    <span style={{ fontSize: 11, color: T.text1 }}>{t.tier}</span>
+                    <span style={{ ...mono, fontSize: 10, color: colors[i] }}>{t.pct}% · {t.calls} calls</span>
+                  </div>
+                  <ScoreBar score={t.pct / 100} color={colors[i]} height={5} />
+                </div>
+              )
+            })}
           </div>
-        ))}
-      </div>
+          {originData.length > 0 && (
+            <div style={{ display: "flex", borderTop: `1px solid ${T.border}`, paddingTop: 14 }}>
+              {originData.map(o => (
+                <div key={o.origin} style={{ flex: 1, textAlign: "center" }}>
+                  <div style={{ ...mono, fontSize: 20, fontWeight: 700, color: o.color }}>{o.pct}%</div>
+                  <div style={{ fontSize: 10, color: T.text2, marginTop: 2, textTransform: "capitalize" }}>{o.origin}</div>
+                  <div style={{ ...mono, fontSize: 9, color: o.color }}>{o.cost}/call</div>
+                </div>
+              ))}
+            </div>
+          )}
+        </>
+      )}
     </Card>
   )
 }
 
-function SavingsCalculator({ onInfo }) {
+function SavingsCalculator({ onInfo, avgCostPerRun }) {
   const [runs, setRuns] = useState(10)
-  const devCost  = (runs * 0.0157).toFixed(2)
-  const opusCost = (runs * 0.42).toFixed(2)
-  const saved    = (runs * (0.42 - 0.0157)).toFixed(2)
-  const pct      = (((0.42 - 0.0157) / 0.42) * 100).toFixed(0)
+  // Teto de referência: rodar tudo sempre no modelo mais caro do catálogo
+  // (Claude Opus, ~$5/$25 por 1M tokens) em vez do seu custo médio real por
+  // run — não é um dado observado, é só o limite superior de comparação.
+  const OPUS_ESTIMATE_PER_RUN = 0.42
+  const hasData = avgCostPerRun > 0
+  const devCost  = (runs * avgCostPerRun).toFixed(2)
+  const opusCost = (runs * OPUS_ESTIMATE_PER_RUN).toFixed(2)
+  const saved    = (runs * (OPUS_ESTIMATE_PER_RUN - avgCostPerRun)).toFixed(2)
+  const pct      = hasData ? (((OPUS_ESTIMATE_PER_RUN - avgCostPerRun) / OPUS_ESTIMATE_PER_RUN) * 100).toFixed(0) : "—"
 
   return (
     <Card>
       <Label infoKey="savings" onInfo={onInfo}>Calculadora de economia</Label>
-      <div style={{ marginBottom: 14 }}>
-        <div style={{ fontSize: 11, color: T.text2, marginBottom: 6 }}>Runs por mês: <span style={{ color: T.violet, ...mono }}>{runs}</span></div>
-        <input type="range" min={1} max={50} value={runs} onChange={e => setRuns(+e.target.value)} style={{ width: "100%", accentColor: T.violet }} />
-      </div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
-        {[
-          { label: "DevFactory", value: `$${devCost}`,  color: T.green  },
-          { label: "Single Opus",value: `$${opusCost}`, color: T.red    },
-          { label: "Economia",   value: `$${saved}`,    color: T.violet, sub: `↓ ${pct}%` },
-        ].map(s => (
-          <div key={s.label} style={{ background: T.bg2, borderRadius: 8, padding: 10 }}>
-            <div style={{ fontSize: 10, color: T.text2, marginBottom: 4 }}>{s.label}</div>
-            <div style={{ ...mono, fontSize: 16, fontWeight: 700, color: s.color }}>{s.value}</div>
-            {s.sub && <div style={{ ...mono, fontSize: 10, color: s.color }}>{s.sub}</div>}
+      {!hasData ? <EmptyState>Termine pelo menos um run com custo registrado pra ver essa comparação.</EmptyState> : (
+        <>
+          <div style={{ marginBottom: 14 }}>
+            <div style={{ fontSize: 11, color: T.text2, marginBottom: 6 }}>Runs por mês: <span style={{ color: T.violet, ...mono }}>{runs}</span></div>
+            <input type="range" min={1} max={50} value={runs} onChange={e => setRuns(+e.target.value)} style={{ width: "100%", accentColor: T.violet }} />
           </div>
-        ))}
-      </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
+            {[
+              { label: "DevFactory (seu custo médio)", value: `$${devCost}`,  color: T.green  },
+              { label: "Single Opus (teto)",           value: `$${opusCost}`, color: T.red    },
+              { label: "Economia",                     value: `$${saved}`,    color: T.violet, sub: `↓ ${pct}%` },
+            ].map(s => (
+              <div key={s.label} style={{ background: T.bg2, borderRadius: 8, padding: 10 }}>
+                <div style={{ fontSize: 10, color: T.text2, marginBottom: 4 }}>{s.label}</div>
+                <div style={{ ...mono, fontSize: 16, fontWeight: 700, color: s.color }}>{s.value}</div>
+                {s.sub && <div style={{ ...mono, fontSize: 10, color: s.color }}>{s.sub}</div>}
+              </div>
+            ))}
+          </div>
+        </>
+      )}
     </Card>
   )
 }
 
-function ModelLeaderboard({ filterTier, setFilterTier, isMobile, onInfo }) {
-  const filtered = filterTier ? MODEL_PERFORMANCE.filter(m => m.tier === filterTier) : MODEL_PERFORMANCE
-  const sorted   = [...filtered].sort((a, b) => b.score - a.score)
+function ModelLeaderboard({ filterTier, setFilterTier, isMobile, onInfo, models }) {
+  const filtered = filterTier ? models.filter(m => m.tier === filterTier) : models
+  const sorted   = [...filtered].sort((a, b) => b.passedRate - a.passedRate)
 
   return (
     <Card>
@@ -620,25 +605,23 @@ function ModelLeaderboard({ filterTier, setFilterTier, isMobile, onInfo }) {
           ))}
         </div>
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(auto-fill, minmax(300px, 1fr))", gap: 8 }}>
-        {sorted.map((m, i) => {
-          const approvalPct = ((m.approvals / m.calls) * 100).toFixed(0)
-          const isFree = m.cost === 0
-          return (
-            <div key={m.model} style={{ background: T.bg2, border: `1px solid ${T.border}`, borderRadius: 8, padding: 12, position: "relative" }}>
+      {sorted.length === 0 ? <EmptyState>Sem modelos com chamadas registradas ainda{filterTier ? " neste tier" : ""}.</EmptyState> : (
+        <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(auto-fill, minmax(300px, 1fr))", gap: 8 }}>
+          {sorted.map((m, i) => (
+            <div key={`${m.provider}-${m.model}`} style={{ background: T.bg2, border: `1px solid ${T.border}`, borderRadius: 8, padding: 12, position: "relative" }}>
               <div style={{ ...mono, fontSize: 9, color: T.text2, position: "absolute", top: 10, right: 10 }}>#{i + 1}</div>
               <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8, flexWrap: "wrap", paddingRight: 24 }}>
                 <TierDot tier={m.tier} />
                 <span style={{ fontSize: 11, color: T.text0, fontWeight: 600 }}>{m.model}</span>
                 <OriginBadge origin={m.origin} />
-                {isFree && <span style={{ ...mono, fontSize: 9, color: T.green, background: `${T.green}15`, border: `1px solid ${T.green}30`, borderRadius: 3, padding: "1px 5px" }}>FREE</span>}
+                {m.isFree && <span style={{ ...mono, fontSize: 9, color: T.green, background: `${T.green}15`, border: `1px solid ${T.green}30`, borderRadius: 3, padding: "1px 5px" }}>FREE</span>}
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
-                <ScoreBar score={m.score} color={TIER_COLOR[m.tier]} height={4} />
-                <span style={{ ...mono, fontSize: 11, color: TIER_COLOR[m.tier], minWidth: 32 }}>{(m.score * 100).toFixed(0)}%</span>
+                <ScoreBar score={m.passedRate} color={TIER_COLOR[m.tier]} height={4} />
+                <span style={{ ...mono, fontSize: 11, color: TIER_COLOR[m.tier], minWidth: 32 }}>{(m.passedRate * 100).toFixed(0)}%</span>
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 6 }}>
-                {[["Calls", m.calls], ["Approval", `${approvalPct}%`], ["Latency", `${(m.avgLatency/1000).toFixed(1)}s`], ["Cost/call", isFree ? "$0.00" : `$${(m.cost/m.calls).toFixed(5)}`], ["Provider", m.provider], ["Strength", m.strengths[0]]].map(([l, v]) => (
+                {[["Calls", m.calls], ["Auto-crítica ok", `${(m.passedRate * 100).toFixed(0)}%`], ["Cost/call", m.isFree ? "$0.00" : `$${(m.cost / m.calls).toFixed(5)}`], ["Provider", m.provider]].map(([l, v]) => (
                   <div key={l}>
                     <div style={{ fontSize: 9, color: T.text2 }}>{l}</div>
                     <div style={{ ...mono, fontSize: 10, color: T.text1, marginTop: 1 }}>{v}</div>
@@ -646,92 +629,140 @@ function ModelLeaderboard({ filterTier, setFilterTier, isMobile, onInfo }) {
                 ))}
               </div>
             </div>
-          )
-        })}
-      </div>
+          ))}
+        </div>
+      )}
     </Card>
   )
 }
 
-function QualityRadar({ onInfo }) {
+function QualityRadar({ onInfo, data }) {
   return (
     <Card>
       <Label infoKey="quality_council" onInfo={onInfo}>Quality Council — média acumulada</Label>
-      <ResponsiveContainer width="100%" height={200}>
-        <RadarChart data={QUALITY_RADAR} margin={{ top: 4, right: 20, bottom: 4, left: 20 }}>
-          <PolarGrid stroke={T.border2} />
-          <PolarAngleAxis dataKey="dimension" tick={{ ...mono, fontSize: 9, fill: T.text2 }} />
-          <Radar dataKey="score" stroke={T.violet} fill={T.violet} fillOpacity={0.15} strokeWidth={2} />
-          <Tooltip content={<CustomTooltip />} />
-        </RadarChart>
-      </ResponsiveContainer>
+      {data.length === 0 ? <EmptyState>Nenhum relatório de Quality Council ainda.</EmptyState> : (
+        <ResponsiveContainer width="100%" height={200}>
+          <RadarChart data={data} margin={{ top: 4, right: 20, bottom: 4, left: 20 }}>
+            <PolarGrid stroke={T.border2} />
+            <PolarAngleAxis dataKey="dimension" tick={{ ...mono, fontSize: 9, fill: T.text2 }} />
+            <Radar dataKey="score" stroke={T.violet} fill={T.violet} fillOpacity={0.15} strokeWidth={2} />
+            <Tooltip content={<CustomTooltip />} />
+          </RadarChart>
+        </ResponsiveContainer>
+      )}
     </Card>
   )
 }
 
-function TopModelsMini({ onInfo }) {
+function TopModelsMini({ onInfo, models }) {
   return (
     <Card>
-      <Label infoKey="model_performance" onInfo={onInfo}>Top models por score</Label>
-      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-        {[...MODEL_PERFORMANCE].sort((a, b) => b.score - a.score).slice(0, 6).map(m => (
-          <div key={m.model} style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <TierDot tier={m.tier} />
-            <span style={{ fontSize: 11, color: T.text1, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.model}</span>
-            <ScoreBar score={m.score} color={TIER_COLOR[m.tier]} height={4} />
-            <span style={{ ...mono, fontSize: 10, color: T.text2, minWidth: 28 }}>{(m.score * 100).toFixed(0)}%</span>
-          </div>
-        ))}
-      </div>
-    </Card>
-  )
-}
-
-function LearningLoop({ onInfo }) {
-  const colors    = { positivo: T.green, escalado: T.amber, neutro: T.text2, ganho: T.violet }
-  const icons     = { positivo: "✓", escalado: "↑", neutro: "·", ganho: "★" }
-  const tierColors = { T1: T.green, T2: T.amber, T3: T.violet }
-
-  return (
-    <Card>
-      <Label infoKey="learning_loop" onInfo={onInfo}>Learning loop — selector evoluindo</Label>
-      <div style={{ position: "relative", paddingLeft: 20 }}>
-        <div style={{ position: "absolute", left: 6, top: 0, bottom: 0, width: 1, background: T.border2 }} />
-        {LEARNING_EVENTS.map((ev, i) => {
-          const c = colors[ev.impact]
-          return (
-            <div key={i} style={{ display: "flex", gap: 10, marginBottom: 10, alignItems: "flex-start", position: "relative" }}>
-              <div style={{ position: "absolute", left: -20, top: 4, width: 8, height: 8, borderRadius: "50%", background: c, border: `2px solid ${T.bg1}` }} />
-              <span style={{ ...mono, fontSize: 10, color: T.text2, minWidth: 28, flexShrink: 0 }}>R{ev.run}</span>
-              <span style={{ ...mono, fontSize: 10, color: c, minWidth: 10, flexShrink: 0 }}>{icons[ev.impact]}</span>
-              <span style={{ fontSize: 11, color: T.text1, flex: 1, lineHeight: 1.5 }}>{ev.event}</span>
-              {ev.tier && <span style={{ ...mono, fontSize: 9, color: tierColors[ev.tier], background: `${tierColors[ev.tier]}15`, border: `1px solid ${tierColors[ev.tier]}30`, borderRadius: 3, padding: "1px 5px", flexShrink: 0 }}>{ev.tier}</span>}
+      <Label infoKey="model_performance" onInfo={onInfo}>Top models por auto-crítica</Label>
+      {models.length === 0 ? <EmptyState>Sem dados ainda.</EmptyState> : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {[...models].sort((a, b) => b.passedRate - a.passedRate).slice(0, 6).map(m => (
+            <div key={`${m.provider}-${m.model}`} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <TierDot tier={m.tier} />
+              <span style={{ fontSize: 11, color: T.text1, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.model}</span>
+              <ScoreBar score={m.passedRate} color={TIER_COLOR[m.tier]} height={4} />
+              <span style={{ ...mono, fontSize: 10, color: T.text2, minWidth: 28 }}>{(m.passedRate * 100).toFixed(0)}%</span>
             </div>
-          )
-        })}
-      </div>
+          ))}
+        </div>
+      )}
     </Card>
   )
 }
 
-function OriginEvolution({ onInfo }) {
+function LearningLoop({ onInfo, activity }) {
+  const colors = { approved: T.green, rejected: T.amber, edited: T.blue }
+  const icons  = { approved: "✓", rejected: "↺", edited: "✎" }
+  const labels = { approved: "aprovado", rejected: "rejeitado — retry com feedback", edited: "aprovado com edição" }
+
+  return (
+    <Card>
+      <Label infoKey="learning_loop" onInfo={onInfo}>Atividade recente — decisões de gate</Label>
+      {activity.length === 0 ? <EmptyState>Nenhuma decisão de gate humano registrada ainda.</EmptyState> : (
+        <div style={{ position: "relative", paddingLeft: 20 }}>
+          <div style={{ position: "absolute", left: 6, top: 0, bottom: 0, width: 1, background: T.border2 }} />
+          {activity.map((ev, i) => {
+            const c = colors[ev.decision] ?? T.text2
+            return (
+              <div key={i} style={{ display: "flex", gap: 10, marginBottom: 10, alignItems: "flex-start", position: "relative" }}>
+                <div style={{ position: "absolute", left: -20, top: 4, width: 8, height: 8, borderRadius: "50%", background: c, border: `2px solid ${T.bg1}` }} />
+                <span style={{ ...mono, fontSize: 10, color: c, minWidth: 10, flexShrink: 0 }}>{icons[ev.decision] ?? "·"}</span>
+                <span style={{ fontSize: 11, color: T.text1, flex: 1, lineHeight: 1.5 }}>
+                  <strong style={{ color: T.text0 }}>{ev.runName}</strong> — {STAGE_META[ev.stage]?.label ?? ev.stage}: {labels[ev.decision] ?? ev.decision}
+                </span>
+                <span style={{ ...mono, fontSize: 9, color: T.text2, flexShrink: 0 }}>{new Date(ev.decidedAt).toLocaleDateString("pt-BR")}</span>
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </Card>
+  )
+}
+
+function OriginEvolution({ onInfo, data }) {
   return (
     <Card>
       <Label infoKey="learning_loop" onInfo={onInfo}>Distribuição de origem</Label>
-      <p style={{ fontSize: 11, color: T.text1, marginTop: 0, marginBottom: 14, lineHeight: 1.6 }}>
-        O Selector aprende a preferir modelos chineses para alto volume — reduzindo custo sem sacrificar aprovação.
-      </p>
-      {ORIGIN_SPLIT.map(o => (
-        <div key={o.origin} style={{ marginBottom: 12 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
-            <span style={{ fontSize: 11, color: T.text1, textTransform: "capitalize" }}>{o.origin}</span>
-            <span style={{ ...mono, fontSize: 10, color: o.color }}>{o.pct}% · {o.cost}/call</span>
-          </div>
-          <ScoreBar score={o.pct / 100} color={o.color} height={5} />
-        </div>
-      ))}
+      {data.length === 0 ? <EmptyState>Sem chamadas de modelo registradas ainda.</EmptyState> : (
+        <>
+          <p style={{ fontSize: 11, color: T.text1, marginTop: 0, marginBottom: 14, lineHeight: 1.6 }}>
+            De onde vêm os modelos usados nas suas chamadas até agora, por custo médio por chamada.
+          </p>
+          {data.map(o => (
+            <div key={o.origin} style={{ marginBottom: 12 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+                <span style={{ fontSize: 11, color: T.text1, textTransform: "capitalize" }}>{o.origin}</span>
+                <span style={{ ...mono, fontSize: 10, color: o.color }}>{o.pct}% · {o.cost}/call</span>
+              </div>
+              <ScoreBar score={o.pct / 100} color={o.color} height={5} />
+            </div>
+          ))}
+        </>
+      )}
     </Card>
   )
+}
+
+// ─── Dashboard data ─────────────────────────────────────────────────────────
+// Substitui os arrays mockados: busca agregados reais em GET /api/dashboard,
+// escopados por RLS ao usuário logado (ver app/api/dashboard/route.ts).
+
+const EMPTY_DASHBOARD = {
+  summary: { totalRuns: 0, runningRuns: 0, totalCost: 0, totalCalls: 0, avgApproval: null },
+  runs: [], costByStage: [], costTrend: [], tierDistribution: [
+    { tier: "Tier 1 — free/cheap", calls: 0, pct: 0 },
+    { tier: "Tier 2 — mid", calls: 0, pct: 0 },
+    { tier: "Tier 3 — frontier", calls: 0, pct: 0 },
+  ],
+  originSplit: [], modelPerformance: [], qualityRadar: [], recentActivity: [],
+}
+
+function useDashboardData() {
+  const [data, setData]       = useState(EMPTY_DASHBOARD)
+  const [loading, setLoading] = useState(true)
+  const [error, setError]     = useState(null)
+
+  const fetchData = useCallback(async () => {
+    try {
+      const res = await fetch("/api/dashboard")
+      if (!res.ok) throw new Error("Falha ao carregar os dados do dashboard.")
+      setData(await res.json())
+      setError(null)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Falha ao carregar os dados do dashboard.")
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => { fetchData() }, [fetchData])
+
+  return { data, loading, error, refetch: fetchData }
 }
 
 // ─── Dashboard ────────────────────────────────────────────────────────────────
@@ -745,9 +776,12 @@ export default function Dashboard({ onNewProject, onSettings } = {}) {
   const [filterTier,  setFilterTier]  = useState(null)
   const [activeTab,   setActiveTab]   = useState("overview")
   const [activeInfo,  setActiveInfo]  = useState(null)
+  const { data, loading, error } = useDashboardData()
 
   const openInfo  = useCallback((key) => setActiveInfo(key), [])
   const closeInfo = useCallback(() => setActiveInfo(null), [])
+
+  const avgCostPerRun = data.summary.totalRuns > 0 ? data.summary.totalCost / data.summary.totalRuns : 0
 
   const grid2 = { display: "grid", gridTemplateColumns: isTablet ? "1fr" : "1fr 1fr", gap: 12 }
 
@@ -832,44 +866,58 @@ export default function Dashboard({ onNewProject, onSettings } = {}) {
         </button>
       )}
 
-      {/* ── Summary ── */}
-      <SummaryRow isMobile={isMobile} onInfo={openInfo} />
-
-      {/* ── Overview ── */}
-      {activeTab === "overview" && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          <div style={grid2}>
-            <RunsList onSelect={setSelectedRun} selected={selectedRun} onInfo={openInfo} />
-            <TierDistribution onInfo={openInfo} />
-          </div>
-          <div style={grid2}>
-            <CostByStageChart onInfo={openInfo} />
-            <CostTrendChart onInfo={openInfo} />
-          </div>
-          <SavingsCalculator onInfo={openInfo} />
+      {error && (
+        <div style={{ background: "#1a0a0a", border: `1px solid ${T.red}40`, borderRadius: 8, padding: 12, marginBottom: 14, fontSize: 12, color: T.red }}>
+          {error}
         </div>
       )}
 
-      {/* ── Models ── */}
-      {activeTab === "models" && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          <div style={grid2}>
-            <QualityRadar onInfo={openInfo} />
-            <TopModelsMini onInfo={openInfo} />
-          </div>
-          <ModelLeaderboard filterTier={filterTier} setFilterTier={setFilterTier} isMobile={isMobile} onInfo={openInfo} />
+      {loading ? (
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: "80px 0", color: T.text2, fontSize: 12, ...mono }}>
+          Carregando dados…
         </div>
-      )}
+      ) : (
+        <>
+          {/* ── Summary ── */}
+          <SummaryRow isMobile={isMobile} onInfo={openInfo} summary={data.summary} />
 
-      {/* ── Learning ── */}
-      {activeTab === "learning" && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          <div style={grid2}>
-            <CostTrendChart onInfo={openInfo} />
-            <OriginEvolution onInfo={openInfo} />
-          </div>
-          <LearningLoop onInfo={openInfo} />
-        </div>
+          {/* ── Overview ── */}
+          {activeTab === "overview" && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              <div style={grid2}>
+                <RunsList onSelect={setSelectedRun} selected={selectedRun} onInfo={openInfo} runs={data.runs} onNewProject={onNewProject} />
+                <TierDistribution onInfo={openInfo} tierData={data.tierDistribution} originData={data.originSplit} />
+              </div>
+              <div style={grid2}>
+                <CostByStageChart onInfo={openInfo} data={data.costByStage} />
+                <CostTrendChart onInfo={openInfo} data={data.costTrend} />
+              </div>
+              <SavingsCalculator onInfo={openInfo} avgCostPerRun={avgCostPerRun} />
+            </div>
+          )}
+
+          {/* ── Models ── */}
+          {activeTab === "models" && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              <div style={grid2}>
+                <QualityRadar onInfo={openInfo} data={data.qualityRadar} />
+                <TopModelsMini onInfo={openInfo} models={data.modelPerformance} />
+              </div>
+              <ModelLeaderboard filterTier={filterTier} setFilterTier={setFilterTier} isMobile={isMobile} onInfo={openInfo} models={data.modelPerformance} />
+            </div>
+          )}
+
+          {/* ── Learning ── */}
+          {activeTab === "learning" && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              <div style={grid2}>
+                <CostTrendChart onInfo={openInfo} data={data.costTrend} />
+                <OriginEvolution onInfo={openInfo} data={data.originSplit} />
+              </div>
+              <LearningLoop onInfo={openInfo} activity={data.recentActivity} />
+            </div>
+          )}
+        </>
       )}
     </div>
   )

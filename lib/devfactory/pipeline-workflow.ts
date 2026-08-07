@@ -581,7 +581,10 @@ async function persistIterationStep(
     iteration_number: iteration.iterationNumber,
     operation:        iteration.operation,
     model_id:         null, // model_id é FK para o catálogo (models.id) — a seleção guarda modelId/provider como string, não o uuid do catálogo
+    model_provider:   iteration.selectionResult?.model.provider ?? null,
+    model_label:      iteration.selectionResult?.model.displayName ?? null,
     tier_used:        iteration.routerOutput.tier,
+    cost_usd:         iteration.selectionResult?.estimatedCostUsd ?? 0,
     prompt:           null, // prompts não são persistidos (podem conter contexto sensível do briefing) — só input/output relevantes
     output:           iteration.agentOutput,
     self_critique:    iteration.selfCritique,
