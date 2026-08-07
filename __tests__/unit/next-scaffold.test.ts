@@ -11,6 +11,15 @@ describe('ensureNextScaffold', () => {
     expect(result.filter(f => f.path === 'app/page.tsx')).toHaveLength(1)
   })
 
+  it('generates a next.config.js that ignores type/lint errors at build time', () => {
+    const result = ensureNextScaffold([
+      { path: 'app/page.tsx', content: `export default function Page() { return <div /> }` },
+    ])
+    const config = result.find(f => f.path === 'next.config.js')!.content
+    expect(config).toMatch(/ignoreBuildErrors:\s*true/)
+    expect(config).toMatch(/ignoreDuringBuilds:\s*true/)
+  })
+
   it('adds missing bare-import dependencies to package.json', () => {
     const result = ensureNextScaffold([
       { path: 'app/api/leads/route.ts', content: `import { z } from 'zod'\nexport async function POST() {}` },

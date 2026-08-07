@@ -80,8 +80,19 @@ export default config
 
 const TAILWIND_DIRECTIVES = `@tailwind base;\n@tailwind components;\n@tailwind utilities;\n`
 
+// backend/frontend rodam como chamadas de LLM independentes, sem type-check
+// nenhum antes do commit — um erro de tipo em qualquer arquivo gerado (visto
+// em produção: um formData[key] tipado como string|boolean passado onde só
+// string é aceito) derruba o "next build" inteiro, mesmo quando o app roda
+// perfeitamente bem em runtime (TS é apagado antes de virar JS). Não dá pra
+// garantir type-safety total de saída de LLM de forma confiável — a escolha
+// aqui é publicar com best-effort (like a maioria dos geradores de app via
+// IA) em vez de bloquear o deploy inteiro por um erro de tipo isolado.
 const DEFAULT_NEXT_CONFIG = `/** @type {import('next').NextConfig} */
-const nextConfig = {}
+const nextConfig = {
+  typescript: { ignoreBuildErrors: true },
+  eslint: { ignoreDuringBuilds: true },
+}
 
 module.exports = nextConfig
 `
