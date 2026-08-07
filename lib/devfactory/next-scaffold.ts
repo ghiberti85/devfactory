@@ -41,8 +41,44 @@ const DEFAULT_PACKAGE_JSON: Record<string, unknown> = {
     '@types/node':       '^20.14.0',
     '@types/react':      '^19.0.0',
     '@types/react-dom':  '^19.0.0',
+    tailwindcss:         '^3.4.0',
+    postcss:             '^8.4.0',
+    autoprefixer:        '^10.4.0',
   },
 }
+
+// Sem isso, mesmo quando a IA escreve className="bg-blue-600 rounded-lg
+// shadow-lg..." (o padrão mais comum que LLMs usam pra estilizar), essas
+// classes não fazem NADA — Tailwind não é só uma lib, é um passo de build
+// (PostCSS) que gera o CSS a partir das classes usadas. Sem
+// tailwind.config/postcss.config/diretivas @tailwind, o app builda e sobe
+// normal, só que 100% sem estilo — visualmente "cru" mesmo com o código
+// certo. design/frontend não coordenam entre si nem garantem isso sozinhos.
+const DEFAULT_POSTCSS_CONFIG = `module.exports = {
+  plugins: {
+    tailwindcss: {},
+    autoprefixer: {},
+  },
+}
+`
+
+const DEFAULT_TAILWIND_CONFIG = `import type { Config } from 'tailwindcss'
+
+const config: Config = {
+  content: [
+    './app/**/*.{js,ts,jsx,tsx,mdx}',
+    './components/**/*.{js,ts,jsx,tsx,mdx}',
+  ],
+  theme: {
+    extend: {},
+  },
+  plugins: [],
+}
+
+export default config
+`
+
+const TAILWIND_DIRECTIVES = `@tailwind base;\n@tailwind components;\n@tailwind utilities;\n`
 
 const DEFAULT_NEXT_CONFIG = `/** @type {import('next').NextConfig} */
 const nextConfig = {}
@@ -78,7 +114,9 @@ const DEFAULT_TSCONFIG = JSON.stringify(
 
 const DEFAULT_GITIGNORE = `node_modules\n.next\n.env*.local\n`
 
-const FALLBACK_LAYOUT = `export const metadata = {
+const FALLBACK_LAYOUT = `import './globals.css'
+
+export const metadata = {
   title: 'DevFactory App',
 }
 
@@ -96,7 +134,7 @@ const FALLBACK_PAGE = `export default function Page() {
 }
 `
 
-const FALLBACK_GLOBALS_CSS = `html, body {\n  padding: 0;\n  margin: 0;\n}\n`
+const FALLBACK_GLOBALS_CSS = `${TAILWIND_DIRECTIVES}\nhtml, body {\n  padding: 0;\n  margin: 0;\n}\n`
 
 const NEXT_CONFIG_NAMES = ['next.config.js', 'next.config.ts', 'next.config.mjs']
 const APP_ENTRY_PATTERN = /^app\/(page|layout)\.(t|j)sx?$/
@@ -164,6 +202,9 @@ function mergePackageJson(existing: GeneratedFile | undefined, files: GeneratedF
 
   const devDeps = { ...(pkg.devDependencies as Record<string, string> ?? {}) }
   devDeps.typescript ??= '^5.5.0'
+  devDeps.tailwindcss ??= '^3.4.0'
+  devDeps.postcss ??= '^8.4.0'
+  devDeps.autoprefixer ??= '^10.4.0'
 
   const allImported = new Set<string>()
   for (const file of files) {
@@ -195,18 +236,50 @@ function ensureUseClientDirective(file: GeneratedFile): GeneratedFile {
   return { path: file.path, content: `'use client'\n\n${file.content}` }
 }
 
-// ─── globals.css: se algo importa "./globals.css" (convenção do template
-// padrão do create-next-app) mas o arquivo não foi gerado ──────────────────
+// ─── Tailwind: garantir que app/globals.css existe, tem as diretivas
+// @tailwind, e é de fato importado pelo layout raiz — as três coisas têm
+// que estar certas ao mesmo tempo pra classes Tailwind virarem CSS real.
+// Roda depois do fallback de app/layout.tsx/app/page.tsx (ensureNextScaffold
+// garante isso pela ordem de chamadas), então app/layout.tsx sempre existe
+// neste ponto — da IA ou o fallback.
 
-function ensureGlobalsCss(files: GeneratedFile[]): GeneratedFile[] {
-  const referencesGlobalsCss = files.some(
-    f => SOURCE_FILE_PATTERN.test(f.path) && /['"]\.\/globals\.css['"]/.test(f.content),
-  )
-  const hasGlobalsCss = files.some(f => f.path === 'app/globals.css')
-  if (referencesGlobalsCss && !hasGlobalsCss) {
-    return [...files, { path: 'app/globals.css', content: FALLBACK_GLOBALS_CSS }]
+function ensureTailwindDirectives(file: GeneratedFile): GeneratedFile {
+  if (/@tailwind\s+base/.test(file.content)) return file
+  return { ...file, content: `${TAILWIND_DIRECTIVES}\n${file.content}` }
+}
+
+function ensureTailwindWiring(files: GeneratedFile[]): GeneratedFile[] {
+  const result = [...files]
+
+  const layoutIdx = result.findIndex(f => /^app\/layout\.(t|j)sx$/.test(f.path))
+  const layout = layoutIdx !== -1 ? result[layoutIdx] : null
+  const cssImportMatch = layout?.content.match(/import\s+['"](\.\/[^'"]+\.css)['"]/)
+
+  if (cssImportMatch) {
+    // Layout já importa algum CSS (não necessariamente "globals.css") — as
+    // diretivas @tailwind têm que entrar NESSE arquivo, senão ele carrega
+    // sem Tailwind mesmo com tailwind.config/postcss.config presentes, e um
+    // app/globals.css órfão (nunca importado) não ajuda em nada.
+    const cssPath = `app/${cssImportMatch[1].replace(/^\.\//, '')}`
+    const cssIdx = result.findIndex(f => f.path === cssPath)
+    if (cssIdx === -1) {
+      result.push({ path: cssPath, content: FALLBACK_GLOBALS_CSS })
+    } else {
+      result[cssIdx] = ensureTailwindDirectives(result[cssIdx])
+    }
+  } else {
+    const globalsIdx = result.findIndex(f => f.path === 'app/globals.css')
+    if (globalsIdx === -1) {
+      result.push({ path: 'app/globals.css', content: FALLBACK_GLOBALS_CSS })
+    } else {
+      result[globalsIdx] = ensureTailwindDirectives(result[globalsIdx])
+    }
+    if (layoutIdx !== -1) {
+      result[layoutIdx] = { ...result[layoutIdx], content: `import './globals.css'\n${result[layoutIdx].content}` }
+    }
   }
-  return files
+
+  return result
 }
 
 export function ensureNextScaffold(files: GeneratedFile[]): GeneratedFile[] {
@@ -222,6 +295,12 @@ export function ensureNextScaffold(files: GeneratedFile[]): GeneratedFile[] {
   if (!paths.has('.gitignore')) {
     result.push({ path: '.gitignore', content: DEFAULT_GITIGNORE })
   }
+  if (!paths.has('postcss.config.js') && !paths.has('postcss.config.mjs')) {
+    result.push({ path: 'postcss.config.js', content: DEFAULT_POSTCSS_CONFIG })
+  }
+  if (!paths.has('tailwind.config.ts') && !paths.has('tailwind.config.js')) {
+    result.push({ path: 'tailwind.config.ts', content: DEFAULT_TAILWIND_CONFIG })
+  }
 
   const hasAppEntry = result.some(f => APP_ENTRY_PATTERN.test(f.path))
   if (!hasAppEntry) {
@@ -229,7 +308,7 @@ export function ensureNextScaffold(files: GeneratedFile[]): GeneratedFile[] {
     if (!paths.has('app/page.tsx')) result.push({ path: 'app/page.tsx', content: FALLBACK_PAGE })
   }
 
-  result = ensureGlobalsCss(result)
+  result = ensureTailwindWiring(result)
   result = result.map(ensureUseClientDirective)
 
   // package.json por último — precisa ver o resultado final (inclusive os

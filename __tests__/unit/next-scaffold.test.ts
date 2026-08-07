@@ -44,6 +44,30 @@ describe('ensureNextScaffold', () => {
     expect(pkg.dependencies['@/lib/supabase']).toBeUndefined()
   })
 
+  it('wires up Tailwind: config files, devDependencies, directives, and layout import', () => {
+    const result = ensureNextScaffold([
+      { path: 'app/layout.tsx', content: `export default function RootLayout({ children }: any) { return children }` },
+      { path: 'app/page.tsx', content: `export default function Page() { return <div className="bg-blue-600 rounded-lg p-8">Hi</div> }` },
+    ])
+    const pkg = JSON.parse(result.find(f => f.path === 'package.json')!.content)
+    expect(pkg.devDependencies.tailwindcss).toBeDefined()
+    expect(pkg.devDependencies.postcss).toBeDefined()
+    expect(result.some(f => f.path === 'tailwind.config.ts')).toBe(true)
+    expect(result.some(f => f.path === 'postcss.config.js')).toBe(true)
+    const globals = result.find(f => f.path === 'app/globals.css')!
+    expect(globals.content).toMatch(/@tailwind base/)
+    const layout = result.find(f => f.path === 'app/layout.tsx')!
+    expect(layout.content).toMatch(/import ['"]\.\/globals\.css['"]/)
+  })
+
+  it('does not duplicate the globals.css import when the layout already imports css', () => {
+    const result = ensureNextScaffold([
+      { path: 'app/layout.tsx', content: `import './styles.css'\nexport default function RootLayout({ children }: any) { return children }` },
+    ])
+    const layout = result.find(f => f.path === 'app/layout.tsx')!
+    expect(layout.content.match(/import ['"]\.\/globals\.css['"]/g)).toBeNull()
+  })
+
   it('never overwrites an AI-provided package.json field it did not need to touch', () => {
     const result = ensureNextScaffold([
       { path: 'package.json', content: JSON.stringify({ name: 'my-custom-app', dependencies: { next: '15.1.0' } }) },
