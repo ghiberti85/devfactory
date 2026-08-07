@@ -78,11 +78,25 @@ export async function createVercelProject(
     return { id: data.id, name: data.name }
   } catch (err) {
     if (!(err instanceof VercelApiError) || err.status !== 409) throw err
-    // Nome já usado por um projeto existente (ex.: teste anterior) — reaproveita em vez de falhar.
+    // Nome já usado por um projeto existente (ex.: tentativa anterior a esta
+    // correção, quando createVercelProject ainda não passava framework:
+    // 'nextjs') — reaproveita em vez de falhar, mas PATCH pra garantir que
+    // o framework está correto agora. Sem isso, um projeto criado antes
+    // dessa mudança fica preso pra sempre com o preset mal detectado
+    // ("Other", esperando uma pasta public/ estática) mesmo depois do app
+    // gerado buildar com sucesso — visto em produção: "No Output Directory
+    // named 'public' found" com o build do Next.js já compilado e ok.
     const existing = await vercelFetch<VercelCreateProjectResponse>(
       `/v9/projects/${encodeURIComponent(name)}`,
       accessToken,
     )
+    await vercelFetch(`/v9/projects/${encodeURIComponent(existing.id)}`, accessToken, {
+      method: 'PATCH',
+      // outputDirectory: null reseta um valor explícito herdado da
+      // primeira detecção errada (ex.: "public") de volta pro default do
+      // framework (.next) — só setar framework não sobrescreve isso.
+      body: { framework: 'nextjs', outputDirectory: null },
+    })
     return { id: existing.id, name: existing.name }
   }
 }
