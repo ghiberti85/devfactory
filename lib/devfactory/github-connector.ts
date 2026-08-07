@@ -454,3 +454,42 @@ export async function commitFiles(
     htmlUrl:   `https://github.com/${ref.owner}/${ref.repo}/commit/${newCommit.sha}`,
   }
 }
+
+// ─── Ajuste pontual pós-publicação ("✎ Ajustar" no CompletedPanel) ─────────
+// Busca o código-fonte ATUAL do repo (não o output original das etapas
+// backend/frontend — o repo pode já ter passado por scaffold/commits
+// anteriores) pra servir de contexto pro modelo que vai aplicar o ajuste.
+
+const SOURCE_FILE_EXTENSIONS = /\.(ts|tsx|js|jsx|css|json)$/
+const SOURCE_ROOTS = ['app/', 'components/', 'lib/', 'src/']
+const MAX_SOURCE_FILES = 60
+const MAX_SOURCE_FILE_BYTES = 20_000
+
+export async function fetchSourceFiles(
+  ref: GitHubRepoRef,
+  userGithubToken: string,
+): Promise<RepoFile[]> {
+  const repoMeta = await ghFetch<GitHubRepoMeta>(`/repos/${ref.owner}/${ref.repo}`, userGithubToken)
+  const branch = ref.branch ?? repoMeta.default_branch
+
+  const treeData = await ghFetch<GitHubTreeResponse>(
+    `/repos/${ref.owner}/${ref.repo}/git/trees/${branch}?recursive=1`,
+    userGithubToken,
+  )
+
+  const paths = (treeData.tree ?? [])
+    .filter(n => n.type === 'blob')
+    .map(n => n.path)
+    .filter(p => SOURCE_FILE_EXTENSIONS.test(p) && (SOURCE_ROOTS.some(root => p.startsWith(root)) || p === 'package.json'))
+    .slice(0, MAX_SOURCE_FILES)
+
+  const files = await Promise.all(
+    paths.map(async (path): Promise<RepoFile | null> => {
+      const content = await ghFetchRaw(`/repos/${ref.owner}/${ref.repo}/contents/${path}?ref=${branch}`, userGithubToken)
+      if (content == null) return null
+      return { path, content: content.slice(0, MAX_SOURCE_FILE_BYTES), sizeBytes: content.length }
+    }),
+  )
+
+  return files.filter((f): f is RepoFile => f !== null)
+}

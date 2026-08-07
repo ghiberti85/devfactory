@@ -12,7 +12,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getSessionUser, unauthorizedResponse } from '@/lib/devfactory/auth'
 import { createSupabaseServerClient } from '@/lib/devfactory/supabase'
 import { getUserVercelToken } from '@/lib/devfactory/run-registry'
-import { createVercelProject, triggerDeployment, vercelSlugifyProjectName, ensureProjectEnvVars } from '@/lib/devfactory/vercel-deployer'
+import { deployRunToVercel } from '@/lib/devfactory/vercel-deployer'
 
 export async function POST(
   req: NextRequest,
@@ -78,35 +78,18 @@ export async function POST(
     : []
 
   try {
-    const projectName = vercelSlugifyProjectName(`${project.name}-${runId.slice(0, 8)}`)
-    const vercelProject = await createVercelProject(projectName, gitRepo, accessToken)
+    const result = await deployRunToVercel({
+      projectName: `${project.name}-${runId.slice(0, 8)}`,
+      gitRepo,
+      accessToken,
+      envVarNames,
+    })
 
-    // Sem isso, o build falha em "collect page data" sempre que o código
-    // gerado ler process.env no topo do módulo (ex.: cliente Supabase
-    // instanciado fora de uma função) — placeholders só destravam o build,
-    // não fazem a integração funcionar de verdade (ver comentário em
-    // ensureProjectEnvVars). ensureProjectEnvVars devolve só as chaves que
-    // conseguiu de fato aplicar (normaliza "NOME=exemplo" pro nome puro,
-    // descarta o que nem isso for) — reportar envVarNames cru pro usuário
-    // fica enganoso se algumas entradas não viraram env var nenhuma.
-    const appliedEnvVars = envVarNames.length > 0
-      ? await ensureProjectEnvVars(vercelProject.id, envVarNames, accessToken)
-      : []
-
-    const deployment = await triggerDeployment(vercelProject.name, gitRepo, accessToken)
-
-    const deploymentUrl = `https://${deployment.url}`
     await supabase.from('pipeline_runs').update({
-      vercel_deployment_url: deploymentUrl,
+      vercel_deployment_url: result.deploymentUrl,
     }).eq('id', runId)
 
-    return NextResponse.json({
-      ok:            true,
-      deploymentUrl,
-      readyState:    deployment.readyState,
-      vercelProject: vercelProject.name,
-      placeholderEnvVars: appliedEnvVars,
-    })
+    return NextResponse.json({ ok: true, ...result })
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Falha ao publicar na Vercel.'
     return NextResponse.json({ error: message }, { status: 502 })

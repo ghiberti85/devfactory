@@ -669,6 +669,13 @@ function CompletedPanel({ run, runId }: { run: ProjectRun; runId: string }) {
   const [deploymentUrl, setDeploymentUrl] = useState<string | null>(run.vercelDeploymentUrl ?? null)
   const [placeholderEnvVars, setPlaceholderEnvVars] = useState<string[]>([])
 
+  // ── "✎ Ajustar" — patch pontual pós-publicação (propose → revisão → apply) ──
+  const [editInstruction, setEditInstruction] = useState('')
+  const [editStep, setEditStep] = useState<'idle' | 'proposing' | 'applying'>('idle')
+  const [editError, setEditError] = useState<string | null>(null)
+  const [proposedFiles, setProposedFiles] = useState<{ path: string; content: string }[] | null>(null)
+  const [editSuccess, setEditSuccess] = useState<string | null>(null)
+
   async function handleDownload() {
     setDownloading(true)
     setDownloadError(null)
@@ -718,6 +725,54 @@ function CompletedPanel({ run, runId }: { run: ProjectRun; runId: string }) {
     } finally {
       setPublishStep('idle')
     }
+  }
+
+  async function handleProposeEdit() {
+    setEditError(null)
+    setEditSuccess(null)
+    setEditStep('proposing')
+    try {
+      const res = await fetch(`/api/runs/${runId}/edit/propose`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ instruction: editInstruction }),
+      })
+      const body = await res.json()
+      if (!res.ok) throw new Error(body.error ?? 'Falha ao gerar o ajuste.')
+      setProposedFiles(body.files)
+    } catch (err) {
+      setEditError(err instanceof Error ? err.message : 'Falha ao gerar o ajuste.')
+    } finally {
+      setEditStep('idle')
+    }
+  }
+
+  async function handleApplyEdit() {
+    if (!proposedFiles) return
+    setEditError(null)
+    setEditStep('applying')
+    try {
+      const res = await fetch(`/api/runs/${runId}/edit/apply`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ files: proposedFiles, instruction: editInstruction }),
+      })
+      const body = await res.json()
+      if (!res.ok) throw new Error(body.error ?? 'Falha ao aplicar o ajuste.')
+      if (body.deploymentUrl) setDeploymentUrl(body.deploymentUrl)
+      setEditSuccess(body.warning ?? (body.deployed ? 'Ajuste aplicado — novo deploy disparado.' : 'Ajuste commitado.'))
+      setProposedFiles(null)
+      setEditInstruction('')
+    } catch (err) {
+      setEditError(err instanceof Error ? err.message : 'Falha ao aplicar o ajuste.')
+    } finally {
+      setEditStep('idle')
+    }
+  }
+
+  function handleDiscardEdit() {
+    setProposedFiles(null)
+    setEditError(null)
   }
 
   const isFreeCost = run.totalCostUsd < 0.000001
@@ -809,6 +864,65 @@ function CompletedPanel({ run, runId }: { run: ProjectRun; runId: string }) {
         {downloadError && <span style={{ color: '#f87171', fontSize: 11 }}>{downloadError}</span>}
         {publishError && <span style={{ color: '#f87171', fontSize: 11 }}>{publishError}</span>}
       </div>
+
+      {repoUrl && (
+        <div style={{ borderTop: '1px solid #222', paddingTop: 14, display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <div style={{ color: '#e2e8f0', fontSize: 13, fontWeight: 600 }}>✎ Ajustar</div>
+          <div style={{ color: '#94a3b8', fontSize: 12, lineHeight: 1.6 }}>
+            Descreva um ajuste pontual (ex.: &ldquo;remove o link de troubleshooting do rodapé do formulário&rdquo;) — gera só a mudança
+            pedida, você revisa antes de aplicar, e commita + republica automaticamente.
+          </div>
+
+          {!proposedFiles ? (
+            <>
+              <textarea
+                value={editInstruction}
+                onChange={e => setEditInstruction(e.target.value)}
+                placeholder="O que você quer ajustar?"
+                rows={2}
+                style={textareaStyle}
+                disabled={editStep === 'proposing'}
+              />
+              <div>
+                <button
+                  onClick={handleProposeEdit}
+                  disabled={editStep === 'proposing' || !editInstruction.trim()}
+                  style={btnStyle('#a78bfa')}
+                >
+                  {editStep === 'proposing' ? 'Gerando ajuste...' : 'Gerar ajuste'}
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
+              <div style={{ color: '#94a3b8', fontSize: 12 }}>
+                {proposedFiles.length} arquivo{proposedFiles.length > 1 ? 's' : ''} alterado{proposedFiles.length > 1 ? 's' : ''} — revise antes de aplicar:
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 300, overflowY: 'auto' }}>
+                {proposedFiles.map(f => (
+                  <details key={f.path} style={{ background: '#111', border: '1px solid #2d2d2d', borderRadius: 6, padding: 8 }}>
+                    <summary style={{ color: '#a78bfa', fontSize: 12, fontFamily: 'monospace', cursor: 'pointer' }}>{f.path}</summary>
+                    <pre style={{ color: '#94a3b8', fontSize: 10, marginTop: 8, whiteSpace: 'pre-wrap', wordBreak: 'break-word', maxHeight: 200, overflowY: 'auto' }}>
+                      {f.content}
+                    </pre>
+                  </details>
+                ))}
+              </div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button onClick={handleApplyEdit} disabled={editStep === 'applying'} style={btnStyle('#34d399')}>
+                  {editStep === 'applying' ? 'Aplicando...' : '✓ Aplicar e publicar'}
+                </button>
+                <button onClick={handleDiscardEdit} disabled={editStep === 'applying'} style={btnStyle('#f87171', true)}>
+                  ✗ Descartar
+                </button>
+              </div>
+            </>
+          )}
+
+          {editError && <span style={{ color: '#f87171', fontSize: 11 }}>{editError}</span>}
+          {editSuccess && <span style={{ color: '#34d399', fontSize: 11 }}>{editSuccess}</span>}
+        </div>
+      )}
     </div>
   )
 }

@@ -204,3 +204,40 @@ export async function triggerDeployment(
   )
   return { id: data.id, url: data.url, readyState: data.readyState }
 }
+
+// ─── Orquestração compartilhada ─────────────────────────────────────────────
+// create/patch projeto → env vars → deploy. Usado tanto pelo botão
+// "Publicar"/"Republicar" (publish-vercel/route.ts) quanto pelo "✎ Ajustar"
+// pós-publicação (edit/apply/route.ts) — mesma sequência, mesmas correções
+// (framework, ENV_CONFLICT etc.), sem duplicar a lógica em dois lugares.
+export interface DeployRunToVercelParams {
+  projectName: string
+  gitRepo:     { owner: string; repo: string; branch: string }
+  accessToken: string
+  envVarNames: string[]
+}
+
+export interface DeployRunToVercelResult {
+  deploymentUrl:      string
+  readyState:         string
+  vercelProject:      string
+  placeholderEnvVars: string[]
+}
+
+export async function deployRunToVercel(params: DeployRunToVercelParams): Promise<DeployRunToVercelResult> {
+  const projectName = vercelSlugifyProjectName(params.projectName)
+  const vercelProject = await createVercelProject(projectName, params.gitRepo, params.accessToken)
+
+  const placeholderEnvVars = params.envVarNames.length > 0
+    ? await ensureProjectEnvVars(vercelProject.id, params.envVarNames, params.accessToken)
+    : []
+
+  const deployment = await triggerDeployment(vercelProject.name, params.gitRepo, params.accessToken)
+
+  return {
+    deploymentUrl: `https://${deployment.url}`,
+    readyState:    deployment.readyState,
+    vercelProject: vercelProject.name,
+    placeholderEnvVars,
+  }
+}
