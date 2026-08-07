@@ -160,7 +160,14 @@ export async function ensureProjectEnvVars(
       })
       applied.push(key)
     } catch (err) {
-      if (err instanceof VercelApiError && err.status === 409) { applied.push(key); continue } // já existe — não sobrescreve valor real que o usuário possa ter setado
+      // "já existe" nem sempre é 409: confirmado em produção que a Vercel
+      // devolve 400 com code ENV_CONFLICT pra esse caso específico — checar
+      // só o status HTTP deixava passar sem tratar e derrubava a publicação
+      // inteira. Trata como sucesso (a variável já está lá, o que é
+      // exatamente o que essa função quer) em vez de falhar.
+      const isAlreadyExists = err instanceof VercelApiError
+        && (err.status === 409 || /ENV_CONFLICT/.test(err.message))
+      if (isAlreadyExists) { applied.push(key); continue }
       throw err
     }
   }
