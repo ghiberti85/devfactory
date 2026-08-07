@@ -339,6 +339,14 @@ async function runSingleStageStep(
     ? { apiKey: process.env[`PLATFORM_${selection.model.provider.toUpperCase()}_FREE_TIER_KEY`] ?? '', baseUrl: undefined }
     : resolveProviderConfig(selection.model.provider as AgentProvider, keyring)
 
+  // Etapas de código (backend/frontend/tests) geram vários arquivos por
+  // resposta — 8192 tokens é fácil de estourar, e uma resposta cortada no
+  // meio de um JSON falha o parse (ver extractJSON em agent-runner.ts).
+  // Tiers mais altos tendem a suportar (e o Router só escala pra eles
+  // quando a etapa já falhou uma vez) janelas de output maiores.
+  const isCodeStage = stage === 'backend' || stage === 'frontend' || stage === 'tests'
+  const maxTokens = isCodeStage && tier > 1 ? 16000 : 8192
+
   const runner = createAgentRunner()
   const result = await runner.run({
     stage,
@@ -350,34 +358,51 @@ async function runSingleStageStep(
     systemPrompt: buildSystemPrompt(stage, run),
     userPrompt:   buildUserPrompt(stage, run, previousOutput),
     previousOutputs: previousOutput ? [previousOutput] : [],
-    maxTokens:    8192,
+    maxTokens,
     temperature:  0.2,
   })
 
-  // Auto-crítica — modelo barato avalia o output do modelo principal
-  const critiqueModel = DEFAULT_MODELS.find(m => m.id === 'gemini-flash-lite')!
-  const critiqueResult = await runner.run({
-    stage,
-    operation: 'self_critique',
-    modelId:      critiqueModel.modelId,
-    provider:     critiqueModel.provider as AgentProvider,
-    apiKey:       process.env.PLATFORM_GOOGLE_FREE_TIER_KEY ?? '',
-    systemPrompt: 'Avalie o output a seguir. Responda JSON: { "score": 0-1, "passed": bool, "issues": [], "summary": "" }',
-    userPrompt:   JSON.stringify(result.output).slice(0, 3000),
-    previousOutputs: [],
-    maxTokens:    512,
-    temperature:  0.1,
-  })
+  // JSON cortado/malformado (extractJSON caiu no fallback { content,
+  // _parseError: true }) não tem estrutura nenhuma — sem isso, um output
+  // truncado passava pela auto-crítica normalmente (o modelo de crítica só
+  // vê um JSON.stringify de um objeto genérico e não tem como saber que
+  // faltam os campos esperados) e ia pro gate humano como se fosse válido.
+  // Visto em produção: pipeline "completou" mas backend/frontend não
+  // tinham files[] nenhum na hora de publicar.
+  const outputParseFailed = Boolean((result.output as { _parseError?: boolean } | null)?._parseError)
 
-  const critiqueRaw = critiqueResult.output as {
-    score?:  number
-    passed?: boolean
-    issues?: SelfCritique['issues']
-  } | null
-  const selfCritique: SelfCritique = {
-    score:  typeof critiqueRaw?.score === 'number' ? critiqueRaw.score : 0.5,
-    passed: critiqueRaw?.passed ?? (critiqueRaw?.score ?? 0.5) >= run.config.selfCritiqueThreshold,
-    issues: Array.isArray(critiqueRaw?.issues) ? critiqueRaw.issues : [],
+  let selfCritique: SelfCritique
+  if (outputParseFailed) {
+    selfCritique = {
+      score: 0, passed: false,
+      issues: [{ severity: 'high', message: 'Resposta do modelo não é JSON válido (provavelmente cortada por limite de tokens) — sem estrutura esperada (ex.: files[]).' }],
+    }
+  } else {
+    // Auto-crítica — modelo barato avalia o output do modelo principal
+    const critiqueModel = DEFAULT_MODELS.find(m => m.id === 'gemini-flash-lite')!
+    const critiqueResult = await runner.run({
+      stage,
+      operation: 'self_critique',
+      modelId:      critiqueModel.modelId,
+      provider:     critiqueModel.provider as AgentProvider,
+      apiKey:       process.env.PLATFORM_GOOGLE_FREE_TIER_KEY ?? '',
+      systemPrompt: 'Avalie o output a seguir. Responda JSON: { "score": 0-1, "passed": bool, "issues": [], "summary": "" }',
+      userPrompt:   JSON.stringify(result.output).slice(0, 3000),
+      previousOutputs: [],
+      maxTokens:    512,
+      temperature:  0.1,
+    })
+
+    const critiqueRaw = critiqueResult.output as {
+      score?:  number
+      passed?: boolean
+      issues?: SelfCritique['issues']
+    } | null
+    selfCritique = {
+      score:  typeof critiqueRaw?.score === 'number' ? critiqueRaw.score : 0.5,
+      passed: critiqueRaw?.passed ?? (critiqueRaw?.score ?? 0.5) >= run.config.selfCritiqueThreshold,
+      issues: Array.isArray(critiqueRaw?.issues) ? critiqueRaw.issues : [],
+    }
   }
 
   return {
