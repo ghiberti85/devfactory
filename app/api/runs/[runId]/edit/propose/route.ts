@@ -20,6 +20,14 @@ import { fetchSourceFiles } from '@/lib/devfactory/github-connector'
 import { createSelector } from '@/lib/devfactory/model-selector'
 import { createAgentRunner, resolveProviderConfig, type AgentProvider } from '@/lib/devfactory/agent-runner'
 
+// 300s é o teto do plano Hobby (mesmo limite documentado em
+// stream/route.ts). Essa rota faz a PRIMEIRA chamada de LLM direta de
+// dentro de uma rota Next.js normal (as outras rodam dentro de steps do
+// Vercel Workflow SDK, com duração gerida separadamente) — sem isso, o
+// limite padrão da plataforma (bem menor que 300s) mata a função antes
+// mesmo do timeout interno do AgentRunner disparar.
+export const maxDuration = 300
+
 interface GeneratedFile {
   path:    string
   content: string
@@ -107,7 +115,9 @@ export async function POST(
       .join('\n\n')
       .slice(0, 60_000) // teto de segurança de contexto
 
-    const runner = createAgentRunner()
+    // Timeout maior que o default (120s) — contexto de até 60KB de código
+    // + até 16000 tokens de output legitimamente passa dos 120s às vezes.
+    const runner = createAgentRunner({ timeoutMs: 240_000 })
     const result = await runner.run({
       stage:     'frontend',
       operation: 'refine',

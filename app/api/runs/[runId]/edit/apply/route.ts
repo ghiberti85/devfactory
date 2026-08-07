@@ -15,6 +15,11 @@ import { getUserGithubToken, getUserVercelToken } from '@/lib/devfactory/run-reg
 import { commitFiles } from '@/lib/devfactory/github-connector'
 import { deployRunToVercel } from '@/lib/devfactory/vercel-deployer'
 
+// Sem LLM aqui, mas commitFiles() faz várias chamadas sequenciais ao GitHub
+// (blobs → tree → commit → ref) e deployRunToVercel() faz outra leva à API
+// da Vercel — folga sobre o default da plataforma por segurança.
+export const maxDuration = 60
+
 interface GeneratedFile {
   path:    string
   content: string
